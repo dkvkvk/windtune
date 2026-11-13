@@ -11,6 +11,7 @@ on:
       - 'src/**'
       - 'ui/**'
       - 'assets/**'
+      - 'sources/**'
       - 'tools/**'
       - 'package.json'
       - 'package-lock.json'

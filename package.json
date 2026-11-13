@@ -1,7 +1,7 @@
 {
   "name": "windtune",
   "productName": "听风音乐舫",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "听风音乐舫（Electron GUI）：网易云、QQ音乐、酷狗、酷我、JOOX、咪咕 一处搜索，批量下载音频/歌词/封面，支持无损与跨平台补链。",
   "main": "main.js",
   "author": "dkvkvk",
@@ -18,7 +18,8 @@
     "start": "electron .",
     "test": "node test/e2e.js",
     "icon": "node tools/make-icon.js",
-    "dist": "node tools/make-icon.js && electron-builder --win nsis --publish never"
+    "dist": "node tools/make-icon.js && electron-builder --win nsis --publish never",
+    "check-api": "node scripts/check-api.js"
   },
   "devDependencies": {
     "electron": "^38.2.0",

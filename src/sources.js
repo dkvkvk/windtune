@@ -1,17 +1,22 @@
 'use strict';
-/* 平台适配器：每个源实现 search / url / lyric / pic / playlist 里它能做到的那几项。
- * 能力矩阵（2026-11 实测）：
- *   网易云  search✅ url✅(128~FLAC) lyric✅ pic✅ playlist✅   ← 走 GD 音乐台
- *   酷我    search✅ url✅(mp3)      lyric✅ pic✅ playlist✅   ← 直连官方接口
- *   QQ音乐  search✅ url✖(需登录)   lyric✅ pic✖ playlist✖    ← 搜索前端，下载靠补链
- *   酷狗    search✅ url✖(需签名)   lyric✅ pic✅ playlist✖    ← 搜索前端，下载靠补链
- *   JOOX    search✅ url✖          lyric✅ pic✅ playlist✖    ← 走 GD 音乐台
- *   咪咕    search△ url✖          lyric✖ pic✖ playlist✖    ← 尽力而为
+/* 平台适配器：每个源实现 search / url / lyric / pic / playlist / album 里它能做到的那几项。
+ *
+ * 能力矩阵（2026-11 实测，✅可用 ✖不可用 △不稳定/已失效）：
+ *   网易云  search✅ url✅(128~FLAC) lyric✅ pic✅ playlist✅              ← GD 音乐台
+ *   酷我    search✅ url✅(仅 mp3)   lyric✅ pic✅ playlist△(接口已废)      ← 官方直连
+ *   QQ音乐  search✅ url✖(需登录)   lyric✅ pic✖ playlist✅ album✅        ← 搜索前端，下载靠补链
+ *   酷狗    search✅ url✖(需签名)   lyric✅ pic✅ playlist✅               ← 搜索前端，下载靠补链
+ *   JOOX    search✅ url✖           lyric✅ pic✅ playlist✖               ← GD 音乐台
+ *   咪咕    search△ url✖           lyric✖ pic✖ playlist✖               ← 尽力而为
+ *
+ * ⚠️ 所有接口地址集中在 src/endpoints.js —— 平台改版导致失效时只改那个文件。
+ *    自检：npm run check-api
  */
 const crypto = require('crypto');
 const { getText, getJson } = require('./http');
+const { EP } = require('./endpoints');
 
-const GD = 'https://music-api.gdstudio.xyz/api.php';
+const GD = EP.gd;
 
 /* ---------------- 工具 ---------------- */
 
@@ -162,13 +167,13 @@ function kuwoToTrack(x) {
 }
 
 async function kuwoSearch(keyword, limit, signal) {
-  const txt = await getText(`http://search.kuwo.cn/r.s?all=${encodeURIComponent(keyword)}&ft=music&itemset=web_2013&client=kt&pn=0&rn=${Math.min(60, limit || 20)}&rformat=json&encoding=utf8`, { signal, timeout: 20000 });
+  const txt = await getText(`${EP.kuwoSearch}?all=${encodeURIComponent(keyword)}&ft=music&itemset=web_2013&client=kt&pn=0&rn=${Math.min(60, limit || 20)}&rformat=json&encoding=utf8`, { signal, timeout: 20000 });
   return kuwoItems(txt).map(kuwoToTrack);
 }
 
 async function kuwoUrl(tr, signal) {
   const rid = (tr.extra && tr.extra.rid) || tr.id;
-  const j = await getJson(`http://antiserver.kuwo.cn/anti.s?type=convert_url3&rid=${encodeURIComponent(rid)}&format=mp3&response=url`, { signal, timeout: 20000, referer: 'http://www.kuwo.cn/' });
+  const j = await getJson(`${EP.kuwoUrl}?type=convert_url3&rid=${encodeURIComponent(rid)}&format=mp3&response=url`, { signal, timeout: 20000, referer: 'http://www.kuwo.cn/' });
   const url = j && j.url;
   if (!url || !/^https?:/.test(url)) return null;
   return { url, br: 128, size: 0, ext: 'mp3' };
@@ -186,11 +191,11 @@ function lrcFromKuwo(list) {
 async function kuwoLyric(tr, signal) {
   const rid = (tr.extra && tr.extra.rid) || tr.id;
   try {
-    const j = await getJson(`http://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=${encodeURIComponent(rid)}&httpsStatus=1`, { signal, timeout: 20000, referer: 'http://m.kuwo.cn/', retries: 1 });
+    const j = await getJson(`${EP.kuwoInfo}?musicId=${encodeURIComponent(rid)}&httpsStatus=1`, { signal, timeout: 20000, referer: 'http://m.kuwo.cn/', retries: 1 });
     if (j && j.data && Array.isArray(j.data.lrclist) && j.data.lrclist.length) return lrcFromKuwo(j.data.lrclist);
   } catch { /* 落到备用 */ }
   try {
-    const j = await getJson(`https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=${encodeURIComponent(rid)}&httpsStatus=1`, { signal, timeout: 20000, referer: 'https://m.kuwo.cn/', retries: 1 });
+    const j = await getJson(`${EP.kuwoInfoSsl}?musicId=${encodeURIComponent(rid)}&httpsStatus=1`, { signal, timeout: 20000, referer: 'https://m.kuwo.cn/', retries: 1 });
     if (j && j.data && Array.isArray(j.data.lrclist)) return lrcFromKuwo(j.data.lrclist);
   } catch { /* 无歌词 */ }
   return '';
@@ -200,7 +205,7 @@ async function kuwoPic(tr, signal) {
   if (tr.picUrl) return tr.picUrl;
   const rid = (tr.extra && tr.extra.rid) || tr.id;
   try {
-    const j = await getJson(`http://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=${encodeURIComponent(rid)}&httpsStatus=1`, { signal, timeout: 20000, referer: 'http://m.kuwo.cn/', retries: 1 });
+    const j = await getJson(`${EP.kuwoInfo}?musicId=${encodeURIComponent(rid)}&httpsStatus=1`, { signal, timeout: 20000, referer: 'http://m.kuwo.cn/', retries: 1 });
     const pic = j && j.data && j.data.songinfo && j.data.songinfo.pic;
     if (pic) return pic;
   } catch { /* ignore */ }
@@ -208,7 +213,7 @@ async function kuwoPic(tr, signal) {
 }
 
 async function kuwoPlaylist(id, signal) {
-  const j = await getJson(`http://nplserver.kuwo.cn/pl.svc?op=getlistinfo&pid=${encodeURIComponent(id)}&pn=0&rn=300&encode=utf8&keyset=pl2012&identity=pl2012&vipver=1&pcjson=1`, { signal, timeout: 25000 });
+  const j = await getJson(`${EP.kuwoPlaylist}?op=getlistinfo&pid=${encodeURIComponent(id)}&pn=0&rn=300&encode=utf8&keyset=pl2012&identity=pl2012&vipver=1&pcjson=1`, { signal, timeout: 25000 });
   const musiclist = (j && (j.musiclist || j.musicList)) || [];
   if (!musiclist.length) throw new Error('酷我歌单解析失败（ID 无效或歌单已失效）');
   const tracks = musiclist.map((x) => kuwoToTrack({
@@ -233,7 +238,7 @@ async function kuwoPlaylist(id, signal) {
 const QQ_REF = { referer: 'https://y.qq.com/' };
 
 async function qqSearch(keyword, limit, signal) {
-  const j = await getJson(`https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg?format=json&key=${encodeURIComponent(keyword)}&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0`, { signal, timeout: 20000, ...QQ_REF });
+  const j = await getJson(`${EP.qqSearch}?format=json&key=${encodeURIComponent(keyword)}&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0`, { signal, timeout: 20000, ...QQ_REF });
   const list = (j && j.data && j.data.song && j.data.song.itemlist) || [];
   return list.slice(0, limit || 20).map((x) => track({
     source: 'tencent',
@@ -249,7 +254,7 @@ async function qqSearch(keyword, limit, signal) {
 async function qqLyric(tr, signal) {
   const mid = (tr.extra && tr.extra.mid) || tr.id;
   try {
-    const j = await getJson(`https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(mid)}&format=json&nobase64=0&g_tk=5381`, { signal, timeout: 20000, referer: 'https://y.qq.com/portal/player.html', retries: 1 });
+    const j = await getJson(`${EP.qqLyric}?songmid=${encodeURIComponent(mid)}&format=json&nobase64=0&g_tk=5381`, { signal, timeout: 20000, referer: 'https://y.qq.com/portal/player.html', retries: 1 });
     let lrc = (j && j.lyric) || '';
     if (lrc && !/\[/.test(lrc)) {
       try { lrc = Buffer.from(lrc, 'base64').toString('utf8'); } catch { /* 原样 */ }
@@ -259,7 +264,7 @@ async function qqLyric(tr, signal) {
 }
 
 async function qqPlaylist(id, signal) {
-  const j = await getJson(`https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&new_format=1&disstid=${encodeURIComponent(id)}&format=json&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0`, {
+  const j = await getJson(`${EP.qqPlaylist}?type=1&json=1&utf8=1&onlysong=0&new_format=1&disstid=${encodeURIComponent(id)}&format=json&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0`, {
     signal, timeout: 25000, referer: 'https://y.qq.com/n/ryqq/playlist/' + id,
   });
   const cd = (j && j.cdlist && j.cdlist[0]) || null;
@@ -283,7 +288,7 @@ async function qqPlaylist(id, signal) {
 }
 
 async function qqAlbum(albumMid, signal) {
-  const j = await getJson(`https://c.y.qq.com/v8/fcg-bin/fcg_v8_album_info_cp.fcg?albummid=${encodeURIComponent(albumMid)}&g_tk=5381&format=json&platform=yqq`, {
+  const j = await getJson(`${EP.qqAlbum}?albummid=${encodeURIComponent(albumMid)}&g_tk=5381&format=json&platform=yqq`, {
     signal, timeout: 25000, referer: 'https://y.qq.com/',
   });
   const d = j && j.data;
@@ -306,32 +311,47 @@ async function qqAlbum(albumMid, signal) {
   };
 }
 
+/* QQ 直链。
+ * 实测结论（2026-11）：**没有登录态拿不到全曲**。所有正片音质（M800/C600/F000…）
+ * 都返回 errtype=104003；唯一能给 purl 的 RS01/RS02 前缀是 **60 秒试听**
+ * （不同歌曲返回等长文件，见测试记录），绝不能当正片保存。
+ * 所以：只接受正片前缀 + 有 purl，否则返回 null 交给「跨平台补链」。 */
+const QQ_FULL_PREFIX = { M800: ['.mp3', 320], C600: ['.m4a', 320], M500: ['.mp3', 128], C400: ['.m4a', 128], F000: ['.flac', 900] };
+const QQ_PREVIEW_PREFIX = ['RS01', 'RS02', 'A000', 'Q000', 'O800']; // 试听/占位，直接拒绝
+
 async function qqUrl(tr, signal) {
   const mid = (tr.extra && tr.extra.mid) || tr.id;
-  try {
-    const body = {
-      comm: { uin: '0', format: 'json', ct: 19, cv: 1859, platform: 'yqq', needNewCode: 1 },
-      req_1: {
-        module: 'vkey.GetVkeyServer', method: 'CgiGetVkey',
-        param: { filename: [`C400${mid}.m4a`], guid: '10000', songmid: [mid], songtype: [0], uin: '0', loginflag: 1, platform: '20' },
-      },
-    };
-    const j = await getJson('https://u.y.qq.com/cgi-bin/musicu.fcg', {
-      signal, timeout: 20000, retries: 1, method: 'POST', body: JSON.stringify(body),
-      headers: { 'Content-Type': 'application/json', Origin: 'https://y.qq.com' }, referer: 'https://y.qq.com/',
-    });
-    const sip = (j && j.req_1 && j.req_1.data && j.req_1.data.sip && j.req_1.data.sip[0]) || '';
-    const purl = (j && j.req_1 && j.req_1.data && j.req_1.data.midurlinfo && j.req_1.data.midurlinfo[0] && j.req_1.data.midurlinfo[0].purl) || '';
-    if (!purl) return null;
-    return { url: sip + purl, br: 128, size: 0, ext: 'm4a' };
-  } catch { return null; }
+  const uin = (tr.extra && tr.extra.uin) || '0';
+  for (const [prefix, [ext, br]] of Object.entries(QQ_FULL_PREFIX)) {
+    try {
+      const body = {
+        loginUin: uin,
+        comm: { uin, format: 'json', ct: 24, cv: 0, platform: 'yqq' },
+        req_1: {
+          module: 'vkey.GetVkeyServer', method: 'CgiGetVkey',
+          param: { filename: [`${prefix}${mid}${ext}`], guid: '10000', songmid: [mid], songtype: [0], uin, loginflag: 1, platform: '20' },
+        },
+      };
+      const j = await getJson(EP.qqVkey, {
+        signal, timeout: 20000, retries: 1, method: 'POST', body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json', Origin: 'https://y.qq.com' }, referer: 'https://y.qq.com/',
+      });
+      const sip = (j && j.req_1 && j.req_1.data && j.req_1.data.sip && j.req_1.data.sip[0]) || '';
+      const purl = (j && j.req_1 && j.req_1.data && j.req_1.data.midurlinfo && j.req_1.data.midurlinfo[0] && j.req_1.data.midurlinfo[0].purl) || '';
+      if (!purl) continue;
+      /* 二次保险：purl 前缀落在试听名单里就丢掉 */
+      if (QQ_PREVIEW_PREFIX.some((p) => purl.startsWith(p))) continue;
+      return { url: sip + purl, br, size: 0, ext: ext.slice(1) };
+    } catch { /* 试下一个音质 */ }
+  }
+  return null;
 }
 
 /* ---------------- 酷狗（搜索 + 歌词 + 封面） ---------------- */
 
 async function kugouSearch(keyword, limit, signal) {
   const n = Math.min(30, limit || 20);
-  const j = await getJson(`https://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(keyword)}&page=1&pagesize=${n}&platform=WebFilter&userid=-1&clientver=2000&iscorrection=1&privilege_filter=0&filter=10`, { signal, timeout: 20000 });
+  const j = await getJson(`${EP.kugouSearch}?keyword=${encodeURIComponent(keyword)}&page=1&pagesize=${n}&platform=WebFilter&userid=-1&clientver=2000&iscorrection=1&privilege_filter=0&filter=10`, { signal, timeout: 20000 });
   const list = (j && j.data && (j.data.lists || j.data.info)) || [];
   return list.map((x) => {
     const hash = String(x.FileHash || x.hash || '').toUpperCase();
@@ -355,14 +375,25 @@ async function kugouUrl(tr, signal) {
   if (!hash) return null;
   try {
     const key = crypto.createHash('md5').update(hash + 'kgcloudv2').digest('hex');
-    const j = await getJson(`https://trackercdn.kugou.com/i/v2/?appid=1005&pid=2&cmd=25&behavior=play&hash=${hash}&key=${key}&br=hq`, { signal, timeout: 20000, retries: 1 });
+    const j = await getJson(`${EP.kugouTrackercdn}?appid=1005&pid=2&cmd=25&behavior=play&hash=${hash}&key=${key}&br=hq`, { signal, timeout: 20000, retries: 1 });
     const urls = (j && (j.url || j.urls)) || [];
     const first = Array.isArray(urls) ? urls[0] : urls;
     if (first) return { url: first, br: 320, size: 0, ext: '' };
   } catch { /* 试 web 接口 */ }
+  /* 方案二：m.kugou 移动端接口（社区通用做法，社区里 Listen1 用的就是它）。
+   * 它是活的——对免费歌直接返回 url；对付费歌返回 errcode「需要付费」，
+   * 这时我们如实返回 null，交给「跨平台补链」，绝不拿残缺音频充数。 */
+  try {
+    const j = await getJson(`${EP.kugouSongInfo}?cmd=playInfo&hash=${hash}&appid=1005`, {
+      signal, timeout: 20000, retries: 1, referer: 'https://m.kugou.com/',
+      ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    });
+    const u = (j && (j.url || j.play_url)) || '';
+    if (/^https?:\/\//.test(u)) return { url: u, br: Number(j.bitRate) || 128, size: Number(j.fileSize) || 0, ext: String(j.extName || '').replace('.', '') || 'mp3' };
+  } catch { /* 试 web 接口 */ }
   try {
     const mid = crypto.createHash('md5').update(String(Date.now())).digest('hex');
-    const j = await getJson(`https://wwwapi.kugou.com/yy/index.php?r=play/getdata&hash=${hash}&album_id=${albumId}&mid=${mid}&platid=4&_=${Date.now()}`, { signal, timeout: 20000, retries: 1, referer: 'https://www.kugou.com/', headers: { Cookie: `kg_mid=${mid}` } });
+    const j = await getJson(`${EP.kugouApi}?r=play/getdata&hash=${hash}&album_id=${albumId}&mid=${mid}&platid=4&_=${Date.now()}`, { signal, timeout: 20000, retries: 1, referer: 'https://www.kugou.com/', headers: { Cookie: `kg_mid=${mid}` } });
     const u = j && j.data && j.data.play_url;
     if (u) return { url: u, br: 128, size: 0, ext: '' };
   } catch { /* 放弃 */ }
@@ -374,17 +405,17 @@ async function kugouLyric(tr, signal) {
   if (!hash) return '';
   try {
     const dur = (tr.duration ? tr.duration * 1000 : 0) + '';
-    const s = await getJson(`https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=${dur}&hash=${hash}`, { signal, timeout: 20000, retries: 1 });
+    const s = await getJson(`${EP.kugouLyricSearch}?ver=1&man=yes&client=mobi&keyword=&duration=${dur}&hash=${hash}`, { signal, timeout: 20000, retries: 1 });
     const c = s && s.candidates && s.candidates[0];
     if (!c) return '';
-    const d = await getJson(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${c.id}&accesskey=${encodeURIComponent(c.accesskey)}&fmt=lrc&charset=utf8`, { signal, timeout: 20000, retries: 1 });
+    const d = await getJson(`${EP.kugouLyricDown}?ver=1&client=pc&id=${c.id}&accesskey=${encodeURIComponent(c.accesskey)}&fmt=lrc&charset=utf8`, { signal, timeout: 20000, retries: 1 });
     if (d && d.content) return Buffer.from(d.content, 'base64').toString('utf8');
   } catch { /* 无 */ }
   return '';
 }
 
 async function kugouPlaylist(id, signal) {
-  const j = await getJson(`http://mobilecdn.kugou.com/api/v3/special/song?specialid=${encodeURIComponent(id)}&page=1&pagesize=100&version=8000`, { signal, timeout: 25000 });
+  const j = await getJson(`${EP.kugouPlaylist}?specialid=${encodeURIComponent(id)}&page=1&pagesize=100&version=8000`, { signal, timeout: 25000 });
   const info = (j && j.data && j.data.info) || [];
   if (!info.length) throw new Error('酷狗歌单解析失败（ID 无效、歌单为空，或接口已变更）');
   const tracks = info.map((x) => {
@@ -415,7 +446,7 @@ async function kugouPlaylist(id, signal) {
 /* ---------------- 咪咕（尽力而为） ---------------- */
 
 async function miguSearch(keyword, limit, signal) {
-  const j = await getJson(`https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/search_all.do?text=${encodeURIComponent(keyword)}&pageNo=1&pageSize=${Math.min(30, limit || 20)}&searchSwitch=${encodeURIComponent('{"song":1}')}`, { signal, timeout: 20000, referer: 'https://app.c.nf.migu.cn/' });
+  const j = await getJson(`${EP.miguSearch}?text=${encodeURIComponent(keyword)}&pageNo=1&pageSize=${Math.min(30, limit || 20)}&searchSwitch=${encodeURIComponent('{"song":1}')}`, { signal, timeout: 20000, referer: 'https://app.c.nf.migu.cn/' });
   const list = (j && j.songResultData && j.songResultData.resultList) || [];
   return list.map((x) => track({
     source: 'migu',
@@ -429,16 +460,116 @@ async function miguSearch(keyword, limit, signal) {
   })).filter((t) => t.id);
 }
 
+/* 网易云直链：**官方免登录接口优先**，GD 音乐台只作备用。
+ * 这样 GD 抽风（实测会间歇性 aborted / fetch timeout）不会拖垮网易云下载。 */
+async function neteaseUrl(tr, br, signal) {
+  const id = tr.id;
+  const order = [...new Set([(br || 320) * 1000, 320000, 192000, 128000])].filter((b) => b >= 128000);
+  for (const bps of order) {
+    try {
+      const j = await getJson(`${EP.neteaseUrl}?ids=[${encodeURIComponent(id)}]&br=${bps}`, {
+        signal, timeout: 20000, retries: 1, referer: 'https://music.163.com/',
+        headers: { Cookie: 'os=pc; appver=9.0.0' },
+      });
+      const d = j && j.data && j.data[0];
+      /* code=200 且有 url 才算成功；code=404 表示这首歌这一档拿不到 */
+      if (d && d.code === 200 && /^https?:\/\//.test(d.url || '')) {
+        return {
+          url: d.url,
+          br: Math.round((Number(d.br) || bps) / 1000),
+          size: Number(d.size) || 0,
+          ext: (String(d.type || '').toLowerCase().replace('mp3', 'mp3')) || 'mp3',
+        };
+      }
+    } catch { /* 换下一档 */ }
+  }
+  /* 备用：走 GD 音乐台 */
+  return gdUrl('netease', tr, br, signal);
+}
+
+/* ---------------- 网易云：官方接口（不依赖任何第三方中转） ---------------- */
+/* 这是一套**完全独立**的通路：搜索、直链、歌词、封面、歌单全走 music.163.com，
+ * 只要网易云自己不挂，它就不受 GD 音乐台抽风影响。 */
+
+const NETEASE_HDR = { Cookie: 'os=pc; appver=9.0.0; deviceId=windtune' };
+
+async function neteaseSearch(keyword, limit, signal) {
+  const n = Math.min(50, limit || 20);
+  const j = await getJson(`${EP.neteaseSearch}?csrf_token=&s=${encodeURIComponent(keyword)}&type=1&offset=0&total=true&limit=${n}`, {
+    signal, timeout: 20000, retries: 1, referer: 'https://music.163.com/', headers: NETEASE_HDR,
+  });
+  const songs = (j && j.result && j.result.songs) || [];
+  return songs.map((x) => track({
+    source: 'netease',
+    id: x.id,
+    name: stripTags(x.name),
+    artists: toArr((x.artists || x.ar || []).map((a) => a.name)),
+    album: stripTags((x.album && x.album.name) || (x.al && x.al.name) || ''),
+    durationMs: Number(x.duration || x.dt) || 0,
+    picUrl: (x.album && x.album.picUrl) || (x.al && x.al.picUrl) || '',
+    extra: {},
+  })).filter((t) => t.id);
+}
+
+async function neteaseLyric(tr, signal) {
+  try {
+    const j = await getJson(`${EP.neteaseLyric}?id=${encodeURIComponent(tr.id)}&lv=-1&kv=-1&tv=-1`, {
+      signal, timeout: 20000, retries: 1, referer: 'https://music.163.com/', headers: NETEASE_HDR,
+    });
+    const raw = String((j && j.lrc && j.lrc.lyric) || '');
+    const tl = String((j && j.tlyric && j.tlyric.lyric) || '');
+    if (!raw.trim()) return '';
+    return tl.trim() ? `${raw}\n\n/* 中文翻译 */\n${tl}` : raw;
+  } catch { return ''; }
+}
+
+async function neteasePic(tr, signal) {
+  if (tr.picUrl) return tr.picUrl;
+  try {
+    const j = await getJson(`${EP.neteaseDetail}?ids=[${encodeURIComponent(tr.id)}]`, {
+      signal, timeout: 20000, retries: 1, referer: 'https://music.163.com/', headers: NETEASE_HDR,
+    });
+    const s = j && j.songs && j.songs[0];
+    return (s && s.album && s.album.picUrl) || '';
+  } catch { return ''; }
+}
+
+async function neteasePlaylist(id, signal) {
+  const j = await getJson(`${EP.neteasePlaylist}?id=${encodeURIComponent(id)}&n=1000`, {
+    signal, timeout: 25000, referer: 'https://music.163.com/', headers: NETEASE_HDR,
+  });
+  const p = j && j.playlist;
+  if (!p) throw new Error('歌单解析失败（可能 ID 无效或该歌单未公开）');
+  const tracks = (p.tracks || []).map((t) => track({
+    source: 'netease',
+    id: t.id,
+    name: stripTags(t.name),
+    artists: toArr((t.ar || t.artists || []).map((a) => a.name)),
+    album: stripTags((t.al && t.al.name) || (t.album && t.album.name) || ''),
+    durationMs: Number(t.dt) || 0,
+    picUrl: (t.al && t.al.picUrl) || (t.album && t.album.picUrl) || '',
+    extra: {},
+  })).filter((t) => t.id);
+  return {
+    kind: 'playlist',
+    source: 'netease',
+    title: p.name || String(id),
+    subtitle: [(p.creator && p.creator.nickname) || '', `${p.trackCount || tracks.length} 首`].filter(Boolean).join(' · '),
+    total: p.trackCount || tracks.length,
+    tracks,
+  };
+}
+
 /* ---------------- 源注册表 ---------------- */
 
 const SOURCES = {
   netease: {
     id: 'netease', label: '网易云', color: '#e93b3b', canDownload: true,
-    search: (kw, n, sig) => gdSearch('netease', kw, n, sig),
-    url: (tr, br, sig) => gdUrl('netease', tr, br, sig),
-    lyric: (tr, sig) => gdLyric('netease', tr, sig),
-    pic: (tr, sig) => gdPic('netease', tr, sig),
-    playlist: (id, sig) => gdPlaylist('netease', id, sig),
+    search: neteaseSearch,
+    url: neteaseUrl,
+    lyric: neteaseLyric,
+    pic: neteasePic,
+    playlist: neteasePlaylist,
     matchUrl: (id, sig) => `https://music.163.com/#/playlist?id=${id}`,
   },
   kuwo: {

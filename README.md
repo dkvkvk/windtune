@@ -99,11 +99,58 @@ test/e2e.js          引擎端到端自测
 
 ## 接口来源
 
-- 网易云 / JOOX：走 [GD 音乐台 API](https://music.gdstudio.xyz/)（`types=search|playlist|url|lyric|pic`）
-- 酷我：`search.kuwo.cn` 搜索 + `antiserver.kuwo.cn` 直链 + `m.kuwo.cn` 歌词
-- QQ音乐：`c.y.qq.com` smartbox 搜索、老版 `fcg_ucc_getcdinfo` 歌单、`fcg_v8_album_info` 专辑、歌词接口
-- 酷狗：`songsearch.kugou.com` 搜索、`mobilecdn.kugou.com` 歌单、`krcs/lyrics.kugou.com` 歌词
-- 咪咕：`app.c.nf.migu.cn` 搜索（可用性随地区/风控波动）
+**没有一个接口是官方开放平台给你的**——都是各家网页版自己在用的公开接口。这决定了它们的寿命，
+所以我把所有地址集中在 [`src/endpoints.js`](src/endpoints.js)，随时可改、可替换。
+
+| 平台 | 数据从哪来 | 能不能直接下音频 |
+|---|---|---|
+| **网易云** | `music.163.com` 官方接口（搜索/直链/歌词/封面/歌单） | ✅ **能，且免登录**，320k / 192k / 128k 多档 |
+| **酷我** | `search.kuwo.cn` + `antiserver.kuwo.cn` 官方直连 | ✅ 能，免登录（仅 mp3 128k） |
+| **QQ 音乐** | `c.y.qq.com` / `u.y.qq.com` 网页接口 | ❌ 要登录态，否则只给 **60 秒试听** |
+| **酷狗** | `songsearch.kugou.com` / `m.kugou.com` | ❌ 付费歌 `privilege=10`，要登录态 |
+| **JOOX** | GD 音乐台（第三方中转） | ❌ 只做搜索/歌词/封面 |
+| **咪咕** | `app.c.nf.migu.cn` | ❌ 地区/风控限制，多数时候拿不到 |
+
+### QQ / 酷狗 为什么下不了
+
+这不是「没做好」，是平台把音频接口锁在登录态后面了。实测证据：
+
+- **QQ**：歌曲详情显示 `pay_play=1`；vkey 接口对**所有正片音质**（M800/C600/F000…）返回 `errtype=104003`；
+  唯一能拿到 purl 的是 `RS01`/`RS02` 前缀，而它是**60 秒试听**（两首不同的歌返回等长文件、md5 不同）。
+  所以本程序**主动拒绝**这类试听地址，绝不拿它冒充整首。
+- **酷狗**：`m.kugou.com` 的 `getSongInfo` 接口是活的，但对热门曲目一律返回「需要付费」/`privilege=10`。
+- 业界标杆 [Listen1](https://github.com/listen1/listen1_chrome_extension) 的源码里，同样是
+  `if (purl === '') { /* vip */ failure() }`——**它也没辙**，只能靠用户自己的登录 cookie。
+
+所以本程序对这两个平台的做法是：**照常搜索/解析/拿歌词，音频走「跨平台补链」**
+（从网易云或酷我找同名同歌手的音频来下载）。这也是
+[洛雪音乐](https://github.com/lyswhut/lx-music-desktop) 的思路：项目协议第 1.2 条写明
+「本项目本身没有获取某个音频数据的能力」，音频 URL 全部来自用户导入的「自定义源」。
+
+## 接口挂了怎么修
+
+```bash
+npm run check-api        # 一条命令测完 17 条接口，告诉你哪条死了、死在哪一步
+```
+
+输出会直接指出该改哪个常量，例如：
+
+```
+  ✗ 失效  网易云搜索              This operation was aborted
+      → 改 src/endpoints.js 里的 neteaseSearch
+        当前值：https://music.163.com/api/search/get/web
+```
+
+修复流程：
+
+1. 浏览器 F12 打开对应平台网页版，找到它实际请求的地址；
+2. 只改 [`src/endpoints.js`](src/endpoints.js) 里那一行（改完立刻生效，不用碰适配器代码）；
+3. 再跑 `npm run check-api` 确认变绿；
+4. 如果地址没变却仍失效（参数/签名/风控变了），才需要动
+   [`src/sources.js`](src/sources.js) 里对应的函数——每个函数上方都注明了它调哪条接口。
+
+**判断影响面**：`check-api` 结论行会写「两条下载链路都正常 / 仅 X 可下载 / 全失效」，
+只要网易云和酷我里还有一条活着，软件就仍然能下歌。
 
 ## 版本与改名沿革
 

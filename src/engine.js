@@ -170,13 +170,24 @@ async function crossFind(tr, order, signal, cache) {
   return null;
 }
 
+/** 试听片段识别：当接口给了文件大小，用它和歌曲时长反推码率。
+ * QQ 音乐在没有登录态时只给 60 秒试听（实测两首不同的歌返回等长文件），
+ * 这种「音频」绝不能当成整首保存下来——宁可跳过并写明原因。 */
+function looksLikePreview(r, tr) {
+  const dur = Number(tr.duration) || 0;
+  const size = Number(r && r.size) || 0;
+  if (dur < 90 || size <= 0) return false;
+  const kbps = (size * 8) / dur / 1000;
+  return kbps < 64;
+}
+
 /** 解析可下载直链：本平台 -> 跨平台补链 */
 async function resolveUrl(tr, br, fallback, signal, cache) {
   const own = SOURCES[tr.source];
   if (own && typeof own.url === 'function') {
     try {
       const r = await own.url(tr, br, signal);
-      if (r && r.url) return { ...r, from: tr.source, matched: null };
+      if (r && r.url && !looksLikePreview(r, tr)) return { ...r, from: tr.source, matched: null };
     } catch { /* 落到补链 */ }
   }
   if (!fallback) return null;
@@ -186,7 +197,7 @@ async function resolveUrl(tr, br, fallback, signal, cache) {
   if (!altSrc || typeof altSrc.url !== 'function') return null;
   try {
     const r = await altSrc.url(alt, br, signal);
-    if (r && r.url) return { ...r, from: alt.source, matched: alt };
+    if (r && r.url && !looksLikePreview(r, alt)) return { ...r, from: alt.source, matched: alt };
   } catch { /* 全部失败 */ }
   return null;
 }

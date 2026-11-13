@@ -64,7 +64,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AllMusicDownloader-Setup
+          name: WindTune-Setup
           path: out-electron/*.exe
           if-no-files-found: error
 

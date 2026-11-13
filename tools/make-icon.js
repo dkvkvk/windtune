@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 全平台音乐下载器 · 图标生成器（纯 Node、零依赖，只用 fs / path / zlib）
+// 听风音乐舫 · 图标生成器（纯 Node、零依赖，只用 fs / path / zlib）
 //
 // 用法：
 //   node tools/make-icon.js                生成 assets/logo.svg、assets/icon.png、assets/icon.ico
@@ -497,7 +497,7 @@ function buildSVG() {
   makeGlyph(GEOM_BIG, fitFor(32));   // logo.svg 在界面里就是 32×32 显示，按 32 的补偿来画
   const a = [];
   a.push('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 1024 1024"');
-  a.push('     role="img" aria-label="全平台音乐下载器">');
+  a.push('     role="img" aria-label="听风音乐舫">');
   a.push('  <defs>');
   a.push('    <linearGradient id="nmd-base" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">');
   a.push('      <stop offset="0" stop-color="#4f8df7"/>');

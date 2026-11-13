@@ -1,4 +1,4 @@
-# 全平台音乐下载器（All Music Downloader）
+# 听风音乐舫（WindTune）
 
 一站式搜歌 + 批量下载的 Windows 桌面工具：**网易云 / QQ音乐 / 酷狗 / 酷我 / 咪咕 / JOOX** 六平台一处搜索，
 歌单、专辑、单曲链接直接粘贴解析，批量下载音频，并可选同步保存 **歌词（.lrc）** 与 **封面（.jpg）**。
@@ -6,6 +6,9 @@
 支持 **无损音质**（网易云 FLAC），以及在某个平台取不到直链时 **自动跨平台补链**下载。
 
 > 仅供个人学习与备份使用，请支持正版音乐。本工具不破解版权，只做「能公开拿到的就拿到」这件事。
+
+> **改名沿革**：v1.0.0 叫「网易云音乐下载器」，v2.0.0 叫「全平台音乐下载器」，**v2.1.0 起定名「听风音乐舫」（WindTune）**。
+> 仓库地址同步改为 `dkvkvk/windtune`（旧地址会自动跳转），安装包改名 `WindTune-Setup-<version>.exe`，`appId` 改为 `com.dkvkvk.windtune`。
 
 ## 截图
 
@@ -59,7 +62,7 @@
 - `windows-latest` + Node 22 → `npm ci` → `npm run dist`（`electron-builder --win nsis`）
 - 校验 sha256、上传 artifact；`v*` tag 自动发 Release
 
-产物：`out-electron/AllMusicDownloader-Setup-<version>.exe`
+产物：`out-electron/WindTune-Setup-<version>.exe`
 
 > 本地无需运行 Electron（部分机器 dev 模式 Electron 会崩溃），exe 一律交给 CI 构建。
 
@@ -102,10 +105,16 @@ test/e2e.js          引擎端到端自测
 - 酷狗：`songsearch.kugou.com` 搜索、`mobilecdn.kugou.com` 歌单、`krcs/lyrics.kugou.com` 歌词
 - 咪咕：`app.c.nf.migu.cn` 搜索（可用性随地区/风控波动）
 
-## 从 1.x 升级
+## 版本与改名沿革
 
-v1.0.0 是「只支持网易云歌单」的下载器。v2.0.0 换成多平台引擎，`package.json` 的 `productName`、
-`appId`、安装包名字都变了，桌面快捷方式会变成「全平台音乐下载器」。旧的 `downloader.js` 入口保留兼容。
+| 版本 | 显示名 | 安装包 | appId |
+|---|---|---|---|
+| v1.0.0 | 网易云音乐下载器 | `NeteaseMusicDownloader-Setup-1.0.0.exe` | `com.dkvkvk.netease-music-downloader` |
+| v2.0.0 | 全平台音乐下载器 | `AllMusicDownloader-Setup-2.0.0.exe` | `com.dkvkvk.all-music-downloader` |
+| **v2.1.0** | **听风音乐舫** | `WindTune-Setup-2.1.0.exe` | `com.dkvkvk.windtune` |
+
+`appId` 变了意味着 Windows 会把 v2.1.0 当成**另一个软件**：旧的「全平台音乐下载器」不会自动升级，
+需要手动卸载一次，之后就能正常覆盖升级。`downloader.js` 的 1.x 老接口一直保留兼容。
 
 ## License
 

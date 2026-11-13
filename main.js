@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const engine = require('./src/engine');
 
-app.setAppUserModelId('com.dkvkvk.all-music-downloader');
+app.setAppUserModelId('com.dkvkvk.windtune');
 
 let win = null;
 let currentSignal = null;
@@ -24,7 +24,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 700,
     backgroundColor: '#f5f7fb',
-    title: '全平台音乐下载器',
+    title: '听风音乐舫',
     icon: iconPath(),
     autoHideMenuBar: true,
     webPreferences: {

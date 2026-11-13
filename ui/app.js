@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 全平台音乐下载器 · renderer
+ * 听风音乐舫 · renderer
  *
  * 业务逻辑只通过 `api` 访问主进程（preload 注入的 window.api）。
  * window.api 不存在时（例如直接用 Chrome 打开本页面）使用文件末尾的 demo mock，

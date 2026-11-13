@@ -65,7 +65,7 @@ const files = pkg.build.files || [];
 for (const need of ['main.js', 'preload.js', 'src/**/*', 'ui/**/*', 'assets/**/*', 'package.json']) {
   ok(files.includes(need), '打包包含 ' + need);
 }
-ok(pkg.productName === '全平台音乐下载器', 'productName 已更名');
+ok(pkg.productName === '听风音乐舫', 'productName 已更名');
 ok(/^2\.\d+\.\d+/.test(pkg.version), 'version 是 2.x: ' + pkg.version);
 ok(!!pkg.scripts.test && !!pkg.scripts.icon, 'scripts 有 test / icon');
 ok(!pkg.dependencies || Object.keys(pkg.dependencies).length === 0, '运行时零第三方依赖');

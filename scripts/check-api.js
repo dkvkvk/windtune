@@ -36,16 +36,17 @@ const CHECKS = [
   {
     group: '网易云', ep: 'neteaseSearch', impact: '网易云搜索',
     async run() {
-      const j = await getJson(`${EP.neteaseSearch}?csrf_token=&s=${encodeURIComponent('晴天 周杰伦')}&type=1&offset=0&total=true&limit=3`, { signal: SIG, timeout: 20000, referer: 'https://music.163.com/', headers: { Cookie: 'os=pc; appver=9.0.0; deviceId=windtune' } });
-      const list = (j && j.result && j.result.songs) || [];
-      return list.length ? { status: 'OK', detail: `${list.length} 条 · ${list[0].name || ''}` } : { status: 'EMPTY', detail: '返回空' };
+      const { SOURCES } = require('../src/sources');
+      const l = await SOURCES.netease.search('起风了', 10, SIG);
+      return l.length ? { status: 'OK', detail: `${l.length} 条 · ${l[0].name}/${l[0].artists[0]}` } : { status: 'EMPTY', detail: '返回空' };
     },
   },
   {
     group: '网易云', ep: 'neteaseUrl', impact: '★下载（主后端，免登录）', critical: true,
     async run() {
-      const s = await getJson(`${EP.neteaseSearch}?csrf_token=&s=${encodeURIComponent('晴天 周杰伦')}&type=1&offset=0&total=true&limit=1`, { signal: SIG, timeout: 20000, referer: 'https://music.163.com/', headers: { Cookie: 'os=pc; appver=9.0.0; deviceId=windtune' } });
-      const t = (((s || {}).result || {}).songs || [])[0];
+      const { SOURCES } = require('../src/sources');
+      const l = await SOURCES.netease.search('起风了', 5, SIG);
+      const t = l[0];
       if (!t) return { status: 'EMPTY', detail: '搜不到歌，无法测直链' };
       for (const bps of [320000, 192000, 128000]) {
         try {
@@ -60,8 +61,9 @@ const CHECKS = [
   {
     group: '网易云', ep: 'neteaseLyric', impact: '歌词 / 封面',
     async run() {
-      const s = await getJson(`${EP.neteaseSearch}?csrf_token=&s=${encodeURIComponent('晴天')}&type=1&offset=0&total=true&limit=1`, { signal: SIG, timeout: 20000, referer: 'https://music.163.com/', headers: { Cookie: 'os=pc; appver=9.0.0; deviceId=windtune' } });
-      const t = (((s || {}).result || {}).songs || [])[0];
+      const { SOURCES } = require('../src/sources');
+      const l = await SOURCES.netease.search('起风了', 5, SIG);
+      const t = l[0];
       if (!t) return { status: 'EMPTY', detail: '搜不到歌' };
       const hdr = { Cookie: 'os=pc; appver=9.0.0; deviceId=windtune' };
       const lyr = await getJson(`${EP.neteaseLyric}?id=${t.id}&lv=-1&kv=-1&tv=-1`, { signal: SIG, timeout: 20000, referer: 'https://music.163.com/', headers: hdr });
@@ -75,19 +77,32 @@ const CHECKS = [
   {
     group: '网易云', ep: 'neteasePlaylist', impact: '歌单解析',
     async run() {
-      const j = await getJson(`${EP.neteasePlaylist}?id=3778678&n=1000`, { signal: SIG, timeout: 25000, referer: 'https://music.163.com/', headers: { Cookie: 'os=pc; appver=9.0.0; deviceId=windtune' } });
-      const n = (j && j.playlist && (j.playlist.tracks || []).length) || 0;
-      return n > 0 ? { status: 'OK', detail: `${n} 首 · ${j.playlist.name || ''}` } : { status: 'EMPTY', detail: '返回空歌单' };
+      /* 走真正的解析函数（以前只验接口原始返回，软件里解析挂了照样显示绿灯） */
+      const { SOURCES } = require('../src/sources');
+      const r = await SOURCES.netease.playlist('3778678', SIG);
+      const n = (r && r.tracks || []).length;
+      return n > 0 ? { status: 'OK', detail: `${n} 首 · ${r.title || ''}` } : { status: 'EMPTY', detail: '解析出 0 首' };
     },
   },
 
   /* ---------------- GD 音乐台（现在只剩 JOOX 依赖它） ---------------- */
   {
-    group: 'GD 音乐台', ep: 'gd', impact: 'JOOX 搜索 / 歌词 / 封面', known: true,
+    group: 'GD 音乐台', ep: 'gd', impact: 'JOOX 歌词 / 歌单', known: true,
     async run() {
       const j = await getJson(`${EP.gd}?types=search&source=joox&name=${encodeURIComponent('晴天')}&count=3&pages=1`, { signal: SIG, timeout: 20000 });
       const n = Array.isArray(j) ? j.length : 0;
-      return n ? { status: 'OK', detail: `${n} 条（JOOX 可用）` } : { status: 'EMPTY', detail: '返回空（JOOX 会不可用，其它平台不受影响）' };
+      return n ? { status: 'OK', detail: `${n} 条（JOOX 歌词/歌单可用）` } : { status: 'EMPTY', detail: '返回空（只影响 JOOX 歌词与歌单，搜索/下载全都不受影响）' };
+    },
+  },
+  {
+    group: 'JOOX', ep: 'jooxSearch', impact: 'JOOX 搜索 / 封面',
+    async run() {
+      const j = await getJson(`${EP.jooxSearch}?country=hk&lang=zh_TW&key=${encodeURIComponent('晴天 周杰伦')}&type=0`, {
+        signal: SIG, timeout: 20000, retries: 1,
+        headers: { origin: 'http://www.joox.com', referer: 'http://www.joox.com', cookie: 'wmid=142420656; user_type=1; country=hk; session_key=2a5d97d05dc8fe238150184eaf3519ad; uid=142420656; backendCountry=hk' },
+      });
+      const list = (j && j.tracks) || [];
+      return list.length ? { status: 'OK', detail: `${list.length} 条（官方接口，不依赖 GD）` } : { status: 'EMPTY', detail: '返回空' };
     },
   },
 
@@ -101,11 +116,39 @@ const CHECKS = [
     },
   },
   {
-    group: '酷我', ep: 'kuwoUrl', impact: '★下载（补链副后端）', critical: true,
+    group: '酷我', ep: 'bodianUrl', impact: '★下载（320k / FLAC）', critical: true,
     async run() {
-      /* 用一个长期存在的经典曲目 rid，避免依赖搜索 */
+      /* 波点音乐：先领「看广告」豁免，再按 FLAC → 320k → 128k 取流 */
+      const { bodianSign } = require('../src/sources');
+      const H = {
+        'user-agent': 'Dart/2.19 (dart:io)', plat: 'ar', channel: 'aliopen',
+        devid: String(Math.floor(Math.random() * 1e11)), ver: '3.9.0', host: 'bd-api.kuwo.cn',
+      };
+      try {
+        await getJson(`${EP.bodianAd}?uid=-1&token=&timestamp=1724306124436&sign=15a676d66285117ad714e8c8371691da`, {
+          signal: SIG, timeout: 15000, method: 'POST',
+          headers: { ...H, qimei36: '1e9970cbcdc20a031dee9f37100017e1840e', 'content-type': 'application/json; charset=utf-8' },
+          body: JSON.stringify({ type: 5, subType: 5, musicId: 0, adToken: '' }),
+        });
+      } catch { /* 豁免失败也要继续测 */ }
+      for (const [br, kbps] of [['2000kflac', 'FLAC'], ['320kmp3', '320k'], ['128kmp3', '128k']]) {
+        try {
+          const j = await getJson(bodianSign(`${EP.bodianUrl}?&br=${br}&musicId=440614`), {
+            signal: SIG, timeout: 20000, retries: 1,
+            headers: { ...H, 'X-Forwarded-For': '1.0.1.114' },
+          });
+          const url = j && j.data && j.data.audioUrl;
+          if (url) return { status: 'OK', detail: `${kbps} 直链 · ${(url.split('?')[0].split('.').pop() || '').slice(0, 4)}` };
+        } catch { /* 试下一档 */ }
+      }
+      return { status: 'DEAD', detail: '三档都取不到（可能豁免没领到或被风控）' };
+    },
+  },
+  {
+    group: '酷我', ep: 'kuwoUrl', impact: '酷我备用直链（anti.s）',
+    async run() {
       const j = await getJson(`${EP.kuwoUrl}?type=convert_url3&rid=440614&format=mp3&response=url`, { signal: SIG, timeout: 20000, referer: 'http://www.kuwo.cn/' });
-      return (j && /^https?:/.test(j.url || '')) ? { status: 'OK', detail: (j.url.split('?')[0].split('.').pop() || '').slice(0, 4) + ' 直链' } : { status: 'DEAD', detail: '没返回 url' };
+      return (j && /^https?:/.test(j.url || '')) ? { status: 'OK', detail: 'mp3 直链（128k，比波点低两档）' } : { status: 'DEAD', detail: '没返回 url' };
     },
   },
   {
@@ -131,18 +174,20 @@ const CHECKS = [
   {
     group: 'QQ音乐', ep: 'qqSearch', impact: 'QQ 搜索',
     async run() {
-      const j = await getJson(`${EP.qqSearch}?format=json&key=${encodeURIComponent('晴天')}&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0`, { signal: SIG, timeout: 20000, referer: 'https://y.qq.com/' });
-      const list = (j && j.data && j.data.song && j.data.song.itemlist) || [];
-      return list.length ? { status: 'OK', detail: `${list.length} 条` } : { status: 'EMPTY', detail: '返回空' };
+      const { SOURCES } = require('../src/sources');
+      const l = await SOURCES.tencent.search('晴天 周杰伦', 10, SIG);
+      if (!l.length) return { status: 'EMPTY', detail: '返回空（可能被限流，code=2001）' };
+      const degraded = !l[0].album;   // 降级到联想接口时没有专辑/时长
+      return { status: 'OK', detail: `${l.length} 条 · ${l[0].name}/${l[0].artists[0]}${degraded ? '（被限流，已降级联想接口）' : ''}` };
     },
   },
   {
     group: 'QQ音乐', ep: 'qqPlaylist', impact: 'QQ 歌单解析',
     async run() {
-      const j = await getJson(`${EP.qqPlaylist}?type=1&json=1&utf8=1&onlysong=0&new_format=1&disstid=7138573358&format=json&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0`, { signal: SIG, timeout: 25000, referer: 'https://y.qq.com/n/ryqq/playlist/7138573358' });
-      const cd = j && j.cdlist && j.cdlist[0];
-      const n = (cd && (cd.songlist || []).length) || 0;
-      return n ? { status: 'OK', detail: `${n} 首 · ${cd.dissname || ''}` } : { status: 'DEAD', detail: 'cdlist 为空（参数或结构变了）' };
+      const { SOURCES } = require('../src/sources');
+      const r = await SOURCES.tencent.playlist('7138573358', SIG);
+      const n = (r && r.tracks || []).length;
+      return n > 0 ? { status: 'OK', detail: `${n} 首 · ${r.title || ''}` } : { status: 'EMPTY', detail: '解析出 0 首' };
     },
   },
   {
@@ -187,9 +232,10 @@ const CHECKS = [
   {
     group: '酷狗', ep: 'kugouPlaylist', impact: '酷狗歌单解析',
     async run() {
-      const j = await getJson(`${EP.kugouPlaylist}?specialid=2338764&page=1&pagesize=100&version=8000`, { signal: SIG, timeout: 25000 });
-      const n = (j && j.data && (j.data.info || []).length) || 0;
-      return n ? { status: 'OK', detail: `${n} 首` } : { status: 'EMPTY', detail: 'info 为空' };
+      const { SOURCES } = require('../src/sources');
+      const r = await SOURCES.kugou.playlist('2338764', SIG);
+      const n = (r && r.tracks || []).length;
+      return n > 0 ? { status: 'OK', detail: `${n} 首 · ${r.title || ''}` } : { status: 'EMPTY', detail: '解析出 0 首' };
     },
   },
   {

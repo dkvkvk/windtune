@@ -1250,7 +1250,7 @@
     }
 
     const demoApi = {
-      version: '2.3.0-demo',
+      version: '2.4.0-demo',
 
       onProgress: function (cb) {
         if (typeof cb !== 'function') return function () {};

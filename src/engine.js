@@ -49,14 +49,28 @@ function parseLink(input) {
   const hit = (source, kind, id) => ({ source, kind, id: String(id) });
 
   let m;
+  /* 网易云：先认单曲（song?id=），否则 /song/ 链接会被下面的歌单规则抢走 */
+  if ((m = s.match(/music\.163\.com.*?\/song[/?].*?[?&#]id=(\d+)/)) || (m = s.match(/music\.163\.com\/song\?id=(\d+)/))) return hit('netease', 'song', m[1]);
   if ((m = s.match(/music\.163\.com.*?[?#&]id=(\d+)/)) || (m = s.match(/^(\d{5,})$/))) return hit('netease', 'playlist', m[1]);
-  if ((m = s.match(/y\.qq\.com\/n\/ryqq\/playlist\/(\w+)/))) return hit('tencent', 'playlist', m[1]);
-  if ((m = s.match(/y\.qq\.com\/n\/ryqq\/albumDetail\/(\w+)/))) return hit('tencent', 'album', m[1]);
+
+  /* QQ：桌面版 + 手机分享（taoge.html?id= 是最常见的复制来源）*/
+  if ((m = s.match(/i\.y\.qq\.com\/n2\/m\/share\/details\/taoge\.html.*?[?&]id=(\d+)/))) return hit('tencent', 'playlist', m[1]);
+  if ((m = s.match(/y\.qq\.com\/n\/ryqq\/playlist\/(\w+)/)) || (m = s.match(/y\.qq\.com.*[?&#]disstid=(\d+)/))) return hit('tencent', 'playlist', m[1]);
+  if ((m = s.match(/y\.qq\.com\/n\/ryqq\/albumDetail\/(\w+)/)) || (m = s.match(/y\.qq\.com.*[?&#]albummid=(\w+)/))) return hit('tencent', 'album', m[1]);
   if ((m = s.match(/y\.qq\.com.*songDetail\/(\w+)/)) || (m = s.match(/y\.qq\.com.*songmid=(\w+)/))) return hit('tencent', 'song', m[1]);
+
+  /* 酷狗：网页版歌单 + 手机分享（zlist.html?listid=）*/
+  if ((m = s.match(/kugou\.com.*[?&#]listid=(\d+)/))) return hit('kugou', 'playlist', m[1]);
   if ((m = s.match(/kugou\.com.*special\/single\/(\d+)/))) return hit('kugou', 'playlist', m[1]);
   if ((m = s.match(/kugou\.com.*[#&]hash=([0-9a-fA-F]{32})/))) return hit('kugou', 'song', m[1]);
+
+  /* 酷我 */
   if ((m = s.match(/kuwo\.cn\/playlist_detail\/(\d+)/))) return hit('kuwo', 'playlist', m[1]);
   if ((m = s.match(/kuwo\.cn\/play_detail\/(\d+)/))) return hit('kuwo', 'song', m[1]);
+
+  /* 咪咕 */
+  if ((m = s.match(/music\.migu\.cn\/v3\/music\/song\/(\d+)/)) || (m = s.match(/music\.migu\.cn.*[?&#]songId=(\d+)/))) return hit('migu', 'song', m[1]);
+
   if ((m = s.match(/joox\.com.*\/([A-Za-z0-9+/=_-]{10,})/))) return hit('joox', 'song', m[1]);
   if (/^https?:\/\//.test(s)) return null;
   return null;
@@ -121,6 +135,11 @@ const norm = (s) => String(s || '').toLowerCase()
   .replace(/[\s\-_.,!?·、'"“”‘’]/g, '')
   .replace(/[^\p{L}\p{N}]/gu, '');
 
+/* 版本标记：候选里带这些词、而源曲目不带时，扣分——
+ * 否则「发如雪 (纯音乐)」会因为去掉括号后和「发如雪」同名而拿到满分，
+ * 用户点原唱却下回来一段伴奏/纯音乐。 */
+const VERSION_MARKS = /(纯音乐|伴奏|卡拉ok|karaoke|instrumental|inst\b|cover|翻唱|dj|remix|混音|钢琴版|吉他版|古筝版|尤克里里|口琴|八音盒|铃声|试听|片段|live|现场|演唱会|片段版)/i;
+
 function score(cand, tr) {
   const a = norm(cand.name);
   const b = norm(tr.name);
@@ -129,6 +148,10 @@ function score(cand, tr) {
   if (a === b) s += 70;
   else if (a.includes(b) || b.includes(a)) s += 40;
   else return 0;
+  /* 候选名里有版本标记、源曲目里没有 → 大概率不是同一版本，扣 25 分 */
+  const candMark = VERSION_MARKS.test(String(cand.name || ''));
+  const srcMark = VERSION_MARKS.test(String(tr.name || ''));
+  if (candMark && !srcMark) s -= 25;
   const ca = cand.artists.map(norm).filter(Boolean);
   const ta = tr.artists.map(norm).filter(Boolean);
   if (ca.length && ta.length) {
@@ -138,6 +161,24 @@ function score(cand, tr) {
   if (cand.album && tr.album && norm(cand.album) === norm(tr.album)) s += 15;
   if (cand.duration && tr.duration && Math.abs(cand.duration - tr.duration) <= 3) s += 15;
   return s;
+}
+
+/** 补链资格：歌名对得上 **且** 歌手对得上 **且** 版本不冲突。
+ *  为什么这么严：网易云没有周杰伦《发如雪》原版，搜出来的是「发如雪/Choiyl」翻唱和
+ *  「发如雪(钢琴版)」。按分数它们都能过线，但下回来就是别人的歌/纯音乐——
+ *  用户点的是原唱，宁可如实失败，也不给错的东西。 */
+function eligible(cand, tr) {
+  if (score(cand, tr) < 70) return false;
+  const ca = (cand.artists || []).map(norm).filter(Boolean);
+  const ta = (tr.artists || []).map(norm).filter(Boolean);
+  if (ca.length && ta.length) {
+    const overlap = ca.some((x) => ta.some((y) => x === y || x.includes(y) || y.includes(x)));
+    if (!overlap) return false;               // 换人了 = 不是同一首歌
+  }
+  const candMark = VERSION_MARKS.test(String(cand.name || ''));
+  const srcMark = VERSION_MARKS.test(String(tr.name || ''));
+  if (candMark && !srcMark) return false;     // 纯音乐/伴奏/DJ 版 ≠ 原唱
+  return true;
 }
 
 function pickBest(cands, tr) {
@@ -167,6 +208,7 @@ async function crossFind(tr, order, signal, cache) {
     }
     const best = pickBest(cands, tr);
     if (best) return best;
+    /* pickBest 只比名字，歌词/封面场景宽松一点无妨；这里不额外收紧 */
   }
   return null;
 }
@@ -217,18 +259,37 @@ async function resolveUrl(tr, br, fallback, signal, cache) {
   } catch { /* 音源出错不影响后续补链 */ }
 
   if (!fallback) return null;
-  const alt = await crossFind(tr, DOWNLOAD_ORDER, signal, cache);
-  if (!alt) return null;
-  const altSrc = SOURCES[alt.source];
-  if (!altSrc || typeof altSrc.url !== 'function') return null;
-  try {
-    const r = await altSrc.url(alt, br, signal);
-    if (r && r.url && !looksLikePreview(r, alt)) return { ...r, from: alt.source, matched: alt };
-  } catch { /* 平台接口失败 */ }
-  try {
-    const p = await trySourcePlugin(alt, br, signal);
-    if (p) return { ...p, matched: alt, from: alt.source };
-  } catch { /* 音源也失败 */ }
+  /* 逐平台、逐候选验证：
+   * 以前是「第一个匹配上的平台定生死」——网易云搜到个钢琴版、取回来是被截断的试听，
+   * 被判试听后整条补链就放弃了，明明酷我有同一首的 FLAC。
+   * 现在每个平台按得分从高到低试最多 3 个候选，取到**真能下**的才收工。 */
+  const q = `${tr.name} ${tr.artists[0] || ''}`.trim();
+  for (const sid of DOWNLOAD_ORDER) {
+    const src = SOURCES[sid];
+    if (!src || sid === tr.source || typeof src.url !== 'function') continue;
+    const ck = `${sid}|${norm(q)}`;
+    let cands = cache.get(ck);
+    if (!cands) {
+      try { cands = (await src.search(q, 8, signal)) || []; } catch { cands = []; }
+      cache.set(ck, cands);
+    }
+    const ranked = cands
+      .map((c) => ({ c, s: score(c, tr) }))
+      .filter((x) => eligible(x.c, tr))
+      .sort((x, y) => y.s - x.s)
+      .slice(0, 3);
+    for (const { c } of ranked) {
+      if (signal.cancelled) return null;
+      try {
+        const r = await src.url(c, br, signal);
+        if (r && r.url && !looksLikePreview(r, c)) return { ...r, from: sid, matched: c };
+      } catch { /* 换下一个候选 */ }
+      try {
+        const pl = await trySourcePlugin(c, br, signal);
+        if (pl && !looksLikePreview(pl, c)) return { ...pl, matched: c, from: sid };
+      } catch { /* 换下一个候选 */ }
+    }
+  }
   return null;
 }
 

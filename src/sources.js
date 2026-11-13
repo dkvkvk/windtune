@@ -13,7 +13,7 @@
  *    自检：npm run check-api
  */
 const crypto = require('crypto');
-const { getText, getJson } = require('./http');
+const { getText, getJson, sleep } = require('./http');
 const { EP } = require('./endpoints');
 
 const GD = EP.gd;
@@ -171,8 +171,78 @@ async function kuwoSearch(keyword, limit, signal) {
   return kuwoItems(txt).map(kuwoToTrack);
 }
 
-async function kuwoUrl(tr, signal) {
+/* ---------------- 酷我直链：波点音乐优先（免登录 320k / FLAC） ----------------
+ * 来源：酷我旗下「波点音乐」App 的接口（同一套曲库、同一个 rid）。
+ * 相比 anti.s 的 128k mp3，这里能拿到 320k mp3 和 FLAC，实测 FLAC 26MB。
+ * 前置：先领一次「看广告」豁免（一小时内有效），否则付费曲目返回 20018。 */
+
+const BODIAN_UA = 'Dart/2.19 (dart:io)';
+const BODIAN_DEVID = String(Math.floor(Math.random() * 1e11));
+const BODIAN_HEADERS = {
+  'user-agent': BODIAN_UA,
+  plat: 'ar',
+  channel: 'aliopen',
+  devid: BODIAN_DEVID,
+  ver: '3.9.0',
+  host: 'bd-api.kuwo.cn',
+};
+let bodianUnlockAt = 0;      // 上次领豁免成功的时间
+let bodianUnlockPending = null;
+
+/** 签名：md5('kuwotest' + 参数去符号后逐字符排序 + pathname)，再拼 &timestamp &sign */
+function bodianSign(rawUrl) {
+  const u = new URL(rawUrl);
+  let str = `${rawUrl}&timestamp=${Date.now()}`;
+  const sorted = str.substring(str.indexOf('?') + 1).replace(/[^a-zA-Z0-9]/g, '').split('').sort().join('');
+  return `${str}&sign=${crypto.createHash('md5').update(`kuwotest${sorted}${u.pathname}`).digest('hex')}`;
+}
+
+/** 领豁免（并发安全，30 分钟内复用） */
+async function bodianUnlock(signal) {
+  const now = Date.now();
+  if (bodianUnlockAt && now - bodianUnlockAt < 25 * 60 * 1000) return true;
+  if (bodianUnlockPending) return bodianUnlockPending;
+  bodianUnlockPending = (async () => {
+    try {
+      const j = await getJson(`${EP.bodianAd}?uid=-1&token=&timestamp=1724306124436&sign=15a676d66285117ad714e8c8371691da`, {
+        signal, timeout: 15000, method: 'POST',
+        headers: { ...BODIAN_HEADERS, qimei36: '1e9970cbcdc20a031dee9f37100017e1840e', 'content-type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ type: 5, subType: 5, musicId: 0, adToken: '' }),
+      });
+      if (j && j.code === 200) { bodianUnlockAt = Date.now(); return true; }
+    } catch { /* 领取失败就走 anti.s */ }
+    return false;
+  })();
+  try { return await bodianUnlockPending; } finally { bodianUnlockPending = null; }
+}
+
+async function bodianUrl(rid, signal) {
+  if (!(await bodianUnlock(signal))) return null;
+  /* from high to low: FLAC → 320k → 128k */
+  const tries = [['2000kflac', 900, 'flac'], ['320kmp3', 320, 'mp3'], ['128kmp3', 128, 'mp3']];
+  for (const [br, kbps, ext] of tries) {
+    try {
+      const j = await getJson(bodianSign(`${EP.bodianUrl}?&br=${br}&musicId=${encodeURIComponent(rid)}`), {
+        signal, timeout: 20000, retries: 1,
+        headers: { ...BODIAN_HEADERS, 'X-Forwarded-For': '1.0.1.114' },
+      });
+      const url = j && j.data && j.data.audioUrl;
+      if (!url) continue;
+      const realExt = (url.split('?')[0].split('.').pop() || '').toLowerCase();
+      return { url, br: kbps, size: 0, ext: realExt === 'flac' ? 'flac' : ext };
+    } catch { /* 试下一档 */ }
+  }
+  return null;
+}
+
+async function kuwoUrl(tr, br, signal) {
   const rid = (tr.extra && tr.extra.rid) || tr.id;
+  /* 1) 波点（320k / FLAC） */
+  try {
+    const r = await bodianUrl(rid, signal);
+    if (r) return r;
+  } catch { /* 落到 anti.s */ }
+  /* 2) 官方 anti.s（只有 mp3） */
   const j = await getJson(`${EP.kuwoUrl}?type=convert_url3&rid=${encodeURIComponent(rid)}&format=mp3&response=url`, { signal, timeout: 20000, referer: 'http://www.kuwo.cn/' });
   const url = j && j.url;
   if (!url || !/^https?:/.test(url)) return null;
@@ -237,18 +307,90 @@ async function kuwoPlaylist(id, signal) {
 
 const QQ_REF = { referer: 'https://y.qq.com/' };
 
+/* QQ 真搜索接口对连续请求很敏感（search.code=2001 = 限流），
+ * 这里做两件事：① 全局串行 + 最小间隔，② 被限流时退避重试两次。
+ * 一次跨平台搜索只会打一次 QQ，正常使用感知不到延迟。 */
+let qqSearchChain = Promise.resolve();
+let qqSearchLastAt = 0;
+const qqCache = new Map();          // 关键词 → { at, items }，10 分钟内复用，少打接口
+const QQ_CACHE_TTL = 10 * 60 * 1000;
+function qqSearchThrottle(run) {
+  const next = qqSearchChain.then(async () => {
+    const gap = 2500 - (Date.now() - qqSearchLastAt);
+    if (gap > 0) await sleep(gap);
+    try { return await run(); } finally { qqSearchLastAt = Date.now(); }
+  });
+  qqSearchChain = next.catch(() => {});
+  return next;
+}
+
 async function qqSearch(keyword, limit, signal) {
-  const j = await getJson(`${EP.qqSearch}?format=json&key=${encodeURIComponent(keyword)}&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0`, { signal, timeout: 20000, ...QQ_REF });
-  const list = (j && j.data && j.data.song && j.data.song.itemlist) || [];
-  return list.slice(0, limit || 20).map((x) => track({
+  const n = Math.min(40, limit || 20);
+  /* 命中缓存：QQ 那个接口有「搜几次就 2001」的限额，重复搜索不该再打它 */
+  const cacheKey = `${n}|${keyword}`;
+  const hit = qqCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < QQ_CACHE_TTL) return hit.items;
+  const data = {
+    search: {
+      method: 'DoSearchForQQMusicDesktop',
+      module: 'music.search.SearchCgiService',
+      param: { num_per_page: n, page_num: 1, query: keyword, search_type: 0 },
+    },
+  };
+  /* origin 必须是 http:// ，写 https 时该接口返回 0 条（实测） */
+  const fetchOnce = async () => {
+    const j = await getJson(`${EP.qqSearch}?data=${encodeURIComponent(JSON.stringify(data))}`, {
+      signal, timeout: 20000,
+      referer: 'https://y.qq.com/', headers: { origin: 'http://y.qq.com' },
+    });
+    const code = j && j.search && j.search.code;
+    const list = (j && j.search && j.search.data && j.search.data.body && j.search.data.body.song && j.search.data.body.song.list) || [];
+    return { code, list };
+  };
+
+  let { code, list } = await qqSearchThrottle(fetchOnce);
+  /* code=2001 是接口限流，退避后重试两次 */
+  for (const wait of [1500, 3000]) {
+    if (code !== 2001 && list.length) break;
+    if (signal.cancelled) break;
+    await sleep(wait);
+    try { ({ code, list } = await qqSearchThrottle(fetchOnce)); } catch { /* 保留已有结果 */ }
+  }
+  /* 还被限流就退回联想接口，至少让用户看到几首，而不是空列表 */
+  if (!list.length) {
+    try {
+      const sg = await getJson(`${EP.qqSuggest}?format=json&key=${encodeURIComponent(keyword)}&g_tk=5381&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq&needNewCode=0`, {
+        signal, timeout: 20000, referer: 'https://y.qq.com/', headers: { origin: 'http://y.qq.com' },
+      });
+      const sug = (sg && sg.data && sg.data.song && sg.data.song.itemlist) || [];
+      if (sug.length) {
+        const items = sug.slice(0, n).map((x) => track({
+          source: 'tencent',
+          id: x.mid,
+          name: stripTags(x.name),
+          artists: toArr(x.singer),
+          album: '',
+          durationMs: 0,
+          extra: { mid: x.mid },
+        })).filter((t) => t.id);
+        qqCache.set(cacheKey, { at: Date.now(), items });
+        return items;
+      }
+    } catch { /* 彻底没有 */ }
+    return [];
+  }
+  const items = list.slice(0, n).map((x) => track({
     source: 'tencent',
     id: x.mid,
     name: stripTags(x.name),
-    artists: toArr(x.singer),
-    album: '',
-    durationMs: 0,
-    extra: { mid: x.mid, docid: x.docid },
-  }));
+    artists: toArr((x.singer || []).map((a) => a.name)),
+    album: stripTags((x.album && x.album.name) || ''),
+    durationMs: (Number(x.interval) || 0) * 1000,
+    picUrl: '',
+    extra: { mid: x.mid, albumMid: (x.album && x.album.mid) || '', songId: x.id },
+  })).filter((t) => t.id);
+  if (items.length) qqCache.set(cacheKey, { at: Date.now(), items });
+  return items;
 }
 
 async function qqLyric(tr, signal) {
@@ -364,22 +506,84 @@ async function kugouSearch(keyword, limit, signal) {
       album: stripTags(x.AlbumName || x.album_name || ''),
       durationMs: Number(x.Duration || x.duration) || 0,
       picUrl: img ? String(img).replace('{size}', '480') : '',
-      extra: { hash, albumId: x.AlbumID || x.album_id, mixsongid: x.MixSongID },
+      extra: {
+        hash,
+        albumId: x.AlbumID || x.album_id,
+        mixsongid: x.MixSongID,
+        /* 酷狗每首歌三份 hash，逐档取流时要用（付费曲目会在 trackercdn 里被 status:2 挡掉） */
+        hash320: String(x['320hash'] || x['320Hash'] || '').toUpperCase(),
+        sqhash: String(x.sqhash || x.sqHash || '').toUpperCase(),
+      },
     });
   }).filter((t) => t.id);
+}
+
+/** 补齐酷狗的三档 hash：WebFilter 搜索不给 320hash/sqhash，mobilecdn 给。
+ *  只在基础 hash 取流失败时才补一刀，按 hash 精确对齐同一首，不靠猜。 */
+async function kugouEnrichHashes(tr, signal) {
+  const base = String((tr.extra && tr.extra.hash) || tr.id || '').toLowerCase();
+  if (!base) return null;
+  if (tr.extra && tr.extra.hash320 && tr.extra.sqhash) return tr.extra;
+  try {
+    const kw = `${tr.name} ${(tr.artists || [])[0] || ''}`.trim();
+    const j = await getJson(`${EP.kugouCdnSearch}?keyword=${encodeURIComponent(kw)}&page=1&pagesize=10`, { signal, timeout: 15000, retries: 1 });
+    const info = (j && j.data && j.data.info) || [];
+    const hit = info.find((x) => String(x.hash || '').toLowerCase() === base);
+    if (!hit) return null;
+    return {
+      ...(tr.extra || {}),
+      hash320: String(hit['320hash'] || '').toLowerCase(),
+      sqhash: String(hit.sqhash || '').toLowerCase(),
+      albumId: (tr.extra && tr.extra.albumId) || hit.album_id || '',
+    };
+  } catch { return null; }
 }
 
 async function kugouUrl(tr, signal) {
   const hash = ((tr.extra && tr.extra.hash) || tr.id || '').toLowerCase();
   const albumId = (tr.extra && tr.extra.albumId) || '';
   if (!hash) return null;
-  try {
-    const key = crypto.createHash('md5').update(hash + 'kgcloudv2').digest('hex');
-    const j = await getJson(`${EP.kugouTrackercdn}?appid=1005&pid=2&cmd=25&behavior=play&hash=${hash}&key=${key}&br=hq`, { signal, timeout: 20000, retries: 1 });
-    const urls = (j && (j.url || j.urls)) || [];
-    const first = Array.isArray(urls) ? urls[0] : urls;
-    if (first) return { url: first, br: 320, size: 0, ext: '' };
-  } catch { /* 试 web 接口 */ }
+  /* 方案一：trackercdn（UNM 同款）。关键点是**逐档 hash 都要试**——
+   * 酷狗给每首歌三份 hash：sqhash(无损) / 320hash / 基础 hash(128)。
+   * 它不封接口，只按版权标付费：免费曲目任一档都返回真地址，
+   * 付费曲目返回 status:2（需付费）。所以这里能从无损往下试到 128。 */
+  const hashes = [
+    [((tr.extra && tr.extra.sqhash) || '').toLowerCase(), 900, 'flac'],
+    [((tr.extra && tr.extra.hash320) || '').toLowerCase(), 320, 'mp3'],
+    [hash, 128, 'mp3'],
+  ].filter(([h]) => h);
+  for (const [h, kbps, ext] of hashes) {
+    try {
+      const key = crypto.createHash('md5').update(h + 'kgcloudv2').digest('hex');
+      const q = albumId ? `&album_id=${encodeURIComponent(albumId)}` : '';
+      const j = await getJson(`${EP.kugouTrackercdn}?key=${key}&hash=${h}&appid=1005&pid=2&cmd=25&behavior=play${q}`, { signal, timeout: 20000, retries: 1 });
+      const urls = (j && (j.url || j.urls)) || [];
+      const first = Array.isArray(urls) ? urls[0] : urls;
+      if (first) {
+        const realExt = (String(first).split('?')[0].split('.').pop() || '').toLowerCase();
+        return { url: first, br: kbps, size: 0, ext: realExt === 'flac' ? 'flac' : ext };
+      }
+    } catch { /* 试下一档 / 下一个方案 */ }
+  }
+  /* 方案一补：基础 hash 取不到（多半是付费），但同一首的 320/无损 hash 可能可用
+   * （不同档位的版权标记未必一致），补齐后再试一次。 */
+  const rich = await kugouEnrichHashes(tr, signal);
+  if (rich) {
+    for (const [h, kbps, ext] of [[rich.sqhash, 900, 'flac'], [rich.hash320, 320, 'mp3']]) {
+      if (!h || h === hash) continue;
+      try {
+        const key = crypto.createHash('md5').update(h + 'kgcloudv2').digest('hex');
+        const q = rich.albumId ? `&album_id=${encodeURIComponent(rich.albumId)}` : '';
+        const j = await getJson(`${EP.kugouTrackercdn}?key=${key}&hash=${h}&appid=1005&pid=2&cmd=25&behavior=play${q}`, { signal, timeout: 20000, retries: 1 });
+        const urls = (j && (j.url || j.urls)) || [];
+        const first = Array.isArray(urls) ? urls[0] : urls;
+        if (first) {
+          const realExt = (String(first).split('?')[0].split('.').pop() || '').toLowerCase();
+          return { url: first, br: kbps, size: 0, ext: realExt === 'flac' ? 'flac' : ext };
+        }
+      } catch { /* 下一档 */ }
+    }
+  }
   /* 方案二：m.kugou 移动端接口（社区通用做法，社区里 Listen1 用的就是它）。
    * 它是活的——对免费歌直接返回 url；对付费歌返回 errcode「需要付费」，
    * 这时我们如实返回 null，交给「跨平台补链」，绝不拿残缺音频充数。 */
@@ -493,13 +697,44 @@ async function neteaseUrl(tr, br, signal) {
 
 const NETEASE_HDR = { Cookie: 'os=pc; appver=9.0.0; deviceId=windtune' };
 
+const nteaseSearchCache = new Map();      // 关键词 → { at, items }，减少触发频控
+const NETEASE_CACHE_TTL = 5 * 60 * 1000;
+
 async function neteaseSearch(keyword, limit, signal) {
   const n = Math.min(50, limit || 20);
-  const j = await getJson(`${EP.neteaseSearch}?csrf_token=&s=${encodeURIComponent(keyword)}&type=1&offset=0&total=true&limit=${n}`, {
-    signal, timeout: 20000, retries: 1, referer: 'https://music.163.com/', headers: NETEASE_HDR,
-  });
-  const songs = (j && j.result && j.result.songs) || [];
-  return songs.map((x) => track({
+  const ck = `${n}|${keyword}`;
+  const hit = nteaseSearchCache.get(ck);
+  if (hit && Date.now() - hit.at < NETEASE_CACHE_TTL) return hit.items;
+
+  const parse = (j) => ((j && j.result && j.result.songs) || []);
+  /* 两个搜索接口取并集：
+   * - /api/search/get/web 有频控（连续请求回 code=405「操作频繁」）
+   * - /api/search/get 不限这么狠，而且**排序更接近原版**（实测「起风了」它给的是
+   *   冯沁苑(买辣椒也用券) 原唱，/web 给的是翻唱）
+   * 合并后按 id 去重，原版更容易排到前面，补链命中率明显更好。 */
+  const songs = [];
+  const seen = new Set();
+  const push = (list) => {
+    for (const x of list) {
+      if (!x || !x.id || seen.has(String(x.id))) continue;
+      seen.add(String(x.id));
+      songs.push(x);
+    }
+  };
+  try {
+    const j1 = await getJson(`${EP.neteaseSearch}?csrf_token=&s=${encodeURIComponent(keyword)}&type=1&offset=0&total=true&limit=${n}`, {
+      signal, timeout: 20000, retries: 1, referer: 'https://music.163.com/', headers: NETEASE_HDR,
+    });
+    push(parse(j1));
+  } catch { /* 限流或网络失败都不影响下面那条 */ }
+  try {
+    const j2 = await getJson(`${EP.neteaseSearchLegacy}?s=${encodeURIComponent(keyword)}&type=1&offset=0&limit=${n}&total=true`, {
+      signal, timeout: 20000, retries: 1, referer: 'https://music.163.com/', headers: NETEASE_HDR,
+    });
+    push(parse(j2));
+  } catch { /* 只剩第一条的结果 */ }
+
+  const items = songs.map((x) => track({
     source: 'netease',
     id: x.id,
     name: stripTags(x.name),
@@ -509,6 +744,8 @@ async function neteaseSearch(keyword, limit, signal) {
     picUrl: (x.album && x.album.picUrl) || (x.al && x.al.picUrl) || '',
     extra: {},
   })).filter((t) => t.id);
+  if (items.length) nteaseSearchCache.set(ck, { at: Date.now(), items });
+  return items;
 }
 
 async function neteaseLyric(tr, signal) {
@@ -560,6 +797,40 @@ async function neteasePlaylist(id, signal) {
   };
 }
 
+/* ---------------- JOOX：官方搜索/封面（GD 只留歌词与歌单） ---------------- */
+
+const JOOX_HDR = {
+  origin: 'http://www.joox.com',
+  referer: 'http://www.joox.com',
+  cookie: 'wmid=142420656; user_type=1; country=hk; session_key=2a5d97d05dc8fe238150184eaf3519ad; uid=142420656; backendCountry=hk',
+};
+
+async function jooxSearch(keyword, limit, signal) {
+  const j = await getJson(`${EP.jooxSearch}?country=hk&lang=zh_TW&key=${encodeURIComponent(keyword)}&type=0`, {
+    signal, timeout: 20000, retries: 1, headers: JOOX_HDR,
+  });
+  const raw = (j && j.tracks) || [];
+  const list = raw.map((x) => (Array.isArray(x) ? x[0] : x)).filter(Boolean);
+  return list.slice(0, limit || 30).map((t) => track({
+    source: 'joox',
+    id: t.id,
+    name: stripTags(t.name),
+    artists: toArr((t.artist_list || []).map((a) => a.name)),
+    album: stripTags(t.album_name),
+    durationMs: (Number(t.play_duration) || 0) * 1000,
+    picUrl: ((t.images || []).find((i) => i.width >= 1000) || (t.images || [])[0] || {}).url || '',
+    extra: { albumId: t.album_id },
+  })).filter((t) => t.id);
+}
+
+async function jooxPic(tr, signal) {
+  if (tr.picUrl) return tr.picUrl;
+  try {
+    const list = await jooxSearch(`${tr.name} ${(tr.artists || [])[0] || ''}`, 3, signal);
+    return (list[0] && list[0].picUrl) || '';
+  } catch { return ''; }
+}
+
 /* ---------------- 源注册表 ---------------- */
 
 const SOURCES = {
@@ -590,9 +861,9 @@ const SOURCES = {
   },
   joox: {
     id: 'joox', label: 'JOOX', color: '#00b26b', canDownload: false,
-    search: (kw, n, sig) => gdSearch('joox', kw, n, sig),
+    search: jooxSearch,
     lyric: (tr, sig) => gdLyric('joox', tr, sig),
-    pic: (tr, sig) => gdPic('joox', tr, sig),
+    pic: jooxPic,
     url: async () => null,
   },
   migu: {
@@ -605,4 +876,5 @@ const SOURCES = {
 const SOURCE_IDS = Object.keys(SOURCES);
 const SOURCE_LIST = SOURCE_IDS.map((id) => ({ id, label: SOURCES[id].label, color: SOURCES[id].color, canDownload: !!SOURCES[id].canDownload }));
 
-module.exports = { SOURCES, SOURCE_IDS, SOURCE_LIST, track, decodeEntities, stripTags, toArr };
+module.exports = {
+  bodianSign, SOURCES, SOURCE_IDS, SOURCE_LIST, track, decodeEntities, stripTags, toArr };

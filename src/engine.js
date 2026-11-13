@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { getBuffer, getJson, mapLimit, sniff, isAudioExt, sleep } = require('./http');
 const { SOURCES, SOURCE_IDS, SOURCE_LIST, track } = require('./sources');
+const { host: sourceHost, toLxMusicInfo, SOURCE_TO_LX } = require('./plugin');
 
 /* 下载后端优先级：先本平台，再这两个真正能出音频的源 */
 const DOWNLOAD_ORDER = ['netease', 'kuwo', 'kugou', 'tencent'];
@@ -181,6 +182,25 @@ function looksLikePreview(r, tr) {
   return kbps < 64;
 }
 
+/** 自定义音源：把曲目交给用户导入的洛雪音源脚本取地址。
+ *  这是 QQ/酷狗 唯一能拿到整首音频的通道——接口逻辑在脚本里，改了不用等发版。 */
+async function trySourcePlugin(tr, br, signal) {
+  const lxKey = SOURCE_TO_LX[tr.source];
+  if (!lxKey || !sourceHost.supports(lxKey)) return null;
+  const r = await sourceHost.getUrl(lxKey, toLxMusicInfo(tr), br);
+  if (!r) return null;
+  const ext = (r.url.split('?')[0].split('.').pop() || '').toLowerCase();
+  return {
+    url: r.url,
+    br: r.quality === 'flac' || r.quality === 'flac24bit' ? 900 : r.quality === '128k' ? 128 : 320,
+    size: 0,
+    ext: ext.length <= 4 ? ext : 'mp3',
+    from: tr.source,
+    matched: null,
+    viaPlugin: r.plugin || '自定义音源',
+  };
+}
+
 /** 解析可下载直链：本平台 -> 跨平台补链 */
 async function resolveUrl(tr, br, fallback, signal, cache) {
   const own = SOURCES[tr.source];
@@ -190,6 +210,12 @@ async function resolveUrl(tr, br, fallback, signal, cache) {
       if (r && r.url && !looksLikePreview(r, tr)) return { ...r, from: tr.source, matched: null };
     } catch { /* 落到补链 */ }
   }
+  /* 本平台自己取不到 → 交给自定义音源（QQ/酷狗 主要靠这条） */
+  try {
+    const p = await trySourcePlugin(tr, br, signal);
+    if (p && !looksLikePreview(p, tr)) return p;
+  } catch { /* 音源出错不影响后续补链 */ }
+
   if (!fallback) return null;
   const alt = await crossFind(tr, DOWNLOAD_ORDER, signal, cache);
   if (!alt) return null;
@@ -198,7 +224,11 @@ async function resolveUrl(tr, br, fallback, signal, cache) {
   try {
     const r = await altSrc.url(alt, br, signal);
     if (r && r.url && !looksLikePreview(r, alt)) return { ...r, from: alt.source, matched: alt };
-  } catch { /* 全部失败 */ }
+  } catch { /* 平台接口失败 */ }
+  try {
+    const p = await trySourcePlugin(alt, br, signal);
+    if (p) return { ...p, matched: alt, from: alt.source };
+  } catch { /* 音源也失败 */ }
   return null;
 }
 
@@ -211,6 +241,22 @@ async function resolveMeta(tr, signal, cache, wantLyric, wantCover) {
   }
   if (wantCover && own && typeof own.pic === 'function') {
     try { out.cover = tr.picUrl || (await own.pic(tr, signal)) || ''; } catch { /* ignore */ }
+  }
+  /* 本平台取不到 → 先问自定义音源 */
+  if ((wantLyric && !out.lyric) || (wantCover && !out.cover)) {
+    const lxKey = SOURCE_TO_LX[tr.source];
+    if (lxKey && sourceHost.supports(lxKey)) {
+      if (wantLyric && !out.lyric) {
+        const r = await sourceHost.call(lxKey, 'lyric', { musicInfo: toLxMusicInfo(tr) }).catch(() => null);
+        const v = r && r.value;
+        if (v && typeof v === 'object') out.lyric = [v.lyric || '', v.tlyric ? '\n\n/* 中文翻译 */\n' + v.tlyric : ''].join('') || '';
+        else if (typeof v === 'string') out.lyric = v;
+      }
+      if (wantCover && !out.cover) {
+        const r = await sourceHost.call(lxKey, 'pic', { musicInfo: toLxMusicInfo(tr) }).catch(() => null);
+        if (r && typeof r.value === 'string') out.cover = r.value;
+      }
+    }
   }
   if ((wantLyric && !out.lyric) || (wantCover && !out.cover)) {
     const alt = await crossFind(tr, DOWNLOAD_ORDER, signal, cache);

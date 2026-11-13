@@ -230,6 +230,19 @@ const CHECKS = [
 
 const MARK = { OK: `${C.ok}✓ 可用${C.x}`, EMPTY: `${C.warn}○ 空${C.x}`, DEAD: `${C.bad}✗ 失效${C.x}`, KNOWN: `${C.dim}— 已知${C.x}` };
 
+/* ---------------- 自定义音源 ---------------- */
+
+function checkPlugins() {
+  const os = require('os');
+  const path = require('path');
+  const { loadSources } = require('../src/plugin');
+  const dirs = [
+    path.join(process.env.APPDATA || os.homedir(), 'windtune', 'sources'),
+    path.join(__dirname, '..', 'sources'),
+  ];
+  return { loaded: loadSources(dirs), dirs };
+}
+
 (async () => {
   const json = process.argv.includes('--json');
   if (!json) {
@@ -256,6 +269,33 @@ const MARK = { OK: `${C.ok}✓ 可用${C.x}`, EMPTY: `${C.warn}○ 空${C.x}`, D
       console.log(`  ${MARK[r.status]}  ${c.impact.padEnd(18)} ${tail}`);
       if (r.status === 'DEAD') console.log(`      ${C.dim}→ 改 src/endpoints.js 里的 ${c.ep}${C.x}\n      ${C.dim}  当前值：${url}${C.x}`);
     }
+  }
+
+  if (!json) {
+    const { loaded, dirs } = checkPlugins();
+    const good = loaded.filter((p) => !p.error);
+    const plats = [];
+    for (const p of good) for (const k of Object.keys(p.sources || {})) if (!plats.includes(k)) plats.push(k);
+    console.log();
+    console.log(`${C.b}自定义音源${C.x}`);
+    if (!good.length) {
+      console.log(`  ${C.dim}· 未安装${C.x}  ${C.dim}(放一个洛雪格式的 .js 到 ${dirs[0]})${C.x}`);
+      console.log(`  ${C.dim}  QQ/酷狗的整首音频要靠音源；内置示例在 ${dirs[1]}${C.x}`);
+    } else {
+      for (const p of loaded) {
+        const meta = p.info || {};
+        if (p.error) {
+          console.log(`  ${C.bad}✗ 加载失败${C.x}  ${meta.name || p.file}  ${C.dim}→ ${p.error}${C.x}`);
+        } else {
+          const src = Object.entries(p.sources).map(([k, v]) => `${k}(${(v.qualitys || []).join('/') || '默认'})`).join(' ');
+          console.log(`  ${C.ok}✓ 已加载${C.x}  ${meta.name}${meta.version ? ' v' + meta.version : ''}  ${C.dim}${src}${C.x}`);
+        }
+      }
+      const over = plats.filter((k) => ['tx', 'kg'].includes(k));
+      if (over.length) console.log(`  ${C.ok}→ QQ/酷狗的整首音频走音源取流（已覆盖：${over.join(', ')}）${C.x}`);
+      else console.log(`  ${C.dim}→ 目前没有 tx(QQ) / kg(酷狗) 音源${C.x}`);
+    }
+    console.log(`${C.dim}  音源目录：${dirs[0]}${C.x}`);
   }
 
   const dl = results.filter((r) => r.critical);

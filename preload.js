@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld('api', {
   /** 平台连通性自检 -> { ok, data: [...] } */
   checkSources: () => unwrap(ipcRenderer.invoke('app:check-sources')),
 
+  /** 已加载的自定义音源 -> { ok, data: { list, dir } } */
+  plugins: () => unwrap(ipcRenderer.invoke('app:plugins')),
+  openSourcesDir: () => ipcRenderer.invoke('app:open-sources-dir'),
+
   chooseDir: () => ipcRenderer.invoke('app:choose-dir'),
   defaultDir: () => ipcRenderer.invoke('app:default-dir'),
   startDownload: (opts) => ipcRenderer.invoke('app:start-download', opts),

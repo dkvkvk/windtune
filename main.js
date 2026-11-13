@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const engine = require('./src/engine');
+const { loadSources, host: sourceHost } = require('./src/plugin');
 
 app.setAppUserModelId('com.dkvkvk.windtune');
 
@@ -58,6 +59,14 @@ if (!gotLock) {
     if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
   });
   app.whenReady().then(() => {
+    /* 自定义音源：用户放 %APPDATA%\windtune\sources\*.js，内置示例在 app 的 sources 目录。
+     * 加载结果不打印到控制台（仓库卫生检查禁止主线遗留 console.log），
+     * 由 app:plugins / app:check-sources 交给界面展示。 */
+    try {
+      const dirs = [path.join(app.getPath('userData'), 'sources'), path.join(__dirname, 'sources')];
+      fs.mkdirSync(dirs[0], { recursive: true });
+      loadSources(dirs);
+    } catch { /* 音源是增强项，加载失败不影响主流程 */ }
     createWindow();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
@@ -74,6 +83,18 @@ const wrap = (fn) => async (e, ...args) => {
 ipcMain.handle('app:search', wrap(async (opts) => engine.searchAll(opts || {}, null)));
 ipcMain.handle('app:resolve', wrap(async (opts) => engine.resolveInput(opts || {}, null)));
 ipcMain.handle('app:check-sources', wrap(async () => engine.checkSources(null)));
+
+ipcMain.handle('app:plugins', wrap(async () => ({
+  list: sourceHost.status(),
+  dir: path.join(app.getPath('userData'), 'sources'),
+})));
+
+ipcMain.handle('app:open-sources-dir', async () => {
+  const dir = path.join(app.getPath('userData'), 'sources');
+  fs.mkdirSync(dir, { recursive: true });
+  await shell.openPath(dir);
+  return dir;
+});
 
 ipcMain.handle('app:choose-dir', async () => {
   const r = await dialog.showOpenDialog(win, {

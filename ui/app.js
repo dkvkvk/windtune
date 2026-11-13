@@ -762,8 +762,10 @@
       SOURCES.forEach(function (s) {
         if (!map[s.id] || !map[s.id].ok) bad += 1;
       });
-      if (bad) toast('有 ' + bad + ' 个平台不可用，已标记为红点', 'warn');
-      else toast('6 个平台全部可用', 'ok');
+      const pl = (state.plugins && state.plugins.list || []).filter(function (x) { return !x.error; });
+      const tail = pl.length ? ' · 音源 ' + pl.length + ' 个' : ' · 未装音源（QQ/酷狗的整首要靠它）';
+      if (bad) toast('有 ' + bad + ' 个平台不可用，已标记为红点' + tail, 'warn');
+      else toast('6 个平台全部可用' + tail, 'ok');
     } catch (err) {
       state.health = null;
       toast('平台检测失败：' + errText(err), 'error');
@@ -773,6 +775,47 @@
       els.btnCheck.classList.remove('is-loading');
       renderHealth();
     }
+  }
+
+  /* ---------------- 自定义音源 ---------------- */
+
+  async function openSourcesDir() {
+    try {
+      const dir = await api.openSourcesDir();
+      toast('已打开音源目录：' + shortPath(String(dir || '')), 'ok');
+    } catch (err) {
+      toast('打开音源目录失败：' + errText(err), 'error');
+    }
+  }
+
+  async function initPlugins() {
+    if (!api.plugins) return;
+    try {
+      const res = await api.plugins();
+      if (!res || res.ok === false) return;
+      const list = (res.data && res.data.list) || [];
+      const good = list.filter(function (p) { return !p.error; });
+      const plats = [];
+      good.forEach(function (p) {
+        (p.sources || []).forEach(function (x) {
+          if (plats.indexOf(x.source) < 0) plats.push(x.source);
+        });
+      });
+      state.plugins = { list: list, dir: (res.data && res.data.dir) || '' };
+      if (els.srcBtnLabel) {
+        els.srcBtnLabel.textContent = good.length ? '音源 ' + good.length : '音源';
+      }
+      if (els.btnSources) {
+        els.btnSources.title = good.length
+          ? '已加载 ' + good.length + ' 个自定义音源' + (plats.length ? '（' + plats.join('、') + '）' : '') + '\n点击打开目录'
+          : '自定义音源：放一个洛雪格式的 .js 进去就能多支持一个平台';
+      }
+      const bad = list.filter(function (p) { return p.error; });
+      if (good.length) toast('已加载 ' + good.length + ' 个自定义音源' + (plats.length ? '：' + plats.join('、') : ''), 'ok');
+      if (bad.length) {
+        toast('有 ' + bad.length + ' 个音源加载失败：' + bad[0].name + ' → ' + bad[0].error, 'warn');
+      }
+    } catch (err) { /* 音源是增强项，失败不影响主流程 */ }
   }
 
   async function chooseDir() {
@@ -938,6 +981,8 @@
       toasts: $('toasts'),
       health: $('health'),
       btnCheck: $('btnCheck'),
+      btnSources: $('btnSources'),
+      srcBtnLabel: $('srcBtnLabel'),
       brandLogo: $('brandLogo'),
       version: $('version'),
       q: $('q'),
@@ -1011,6 +1056,7 @@
     });
 
     els.btnCheck.addEventListener('click', doCheckSources);
+    if (els.btnSources) els.btnSources.addEventListener('click', openSourcesDir);
     els.btnDir.addEventListener('click', chooseDir);
     els.btnStart.addEventListener('click', startDownload);
     els.btnCancel.addEventListener('click', cancelDownload);
@@ -1112,6 +1158,7 @@
     initVersion();
     initDir();
     initLogo();
+    initPlugins();
     setDlState('idle', '未开始');
 
     try {
@@ -1203,7 +1250,7 @@
     }
 
     const demoApi = {
-      version: '2.1.0-demo',
+      version: '2.3.0-demo',
 
       onProgress: function (cb) {
         if (typeof cb !== 'function') return function () {};
@@ -1245,6 +1292,14 @@
 
       checkSources: function () {
         return Promise.resolve({ ok: true, data: demoHealth() });
+      },
+
+      plugins: function () {
+        return Promise.resolve({ ok: true, data: { list: [], dir: 'C:D\\Users\\你\\AppData\\Roaming\\windtune\\sources' } });
+      },
+
+      openSourcesDir: function () {
+        return Promise.resolve('(demo) 音源目录');
       },
 
       chooseDir: function () {

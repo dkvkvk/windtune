@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+  <title>网易云音乐下载器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>网易云音乐下载器</h1>
+      <p class="sub">基于 GD 音乐台 API · 歌单批量下载 · 仅供个人学习使用</p>
+    </header>
+
+    <section class="card">
+      <label class="lbl">歌单链接或 ID</label>
+      <div class="row">
+        <input id="input" type="text" placeholder="粘贴网易云歌单链接（https://music.163.com/playlist?id=...）或直接输入数字 ID">
+        <button id="parseBtn" class="btn">解析歌单</button>
+      </div>
+      <div id="playlistInfo" class="info hidden"></div>
+    </section>
+
+    <section class="card">
+      <label class="lbl">输出目录</label>
+      <div class="row">
+        <input id="outDir" type="text" placeholder="选择下载保存目录">
+        <button id="chooseBtn" class="btn ghost">选择目录</button>
+      </div>
+      <div class="row opts">
+        <div class="opt">
+          <label class="lbl">音质</label>
+          <select id="br">
+            <option value="320">320k（优先）</option>
+            <option value="192">192k</option>
+            <option value="128">128k</option>
+          </select>
+        </div>
+        <div class="opt">
+          <label class="lbl">并发数</label>
+          <select id="concurrency">
+            <option>1</option>
+            <option>2</option>
+            <option selected>3</option>
+            <option>4</option>
+            <option>5</option>
+            <option>6</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <button id="startBtn" class="btn primary" disabled>开始下载</button>
+        <button id="cancelBtn" class="btn danger hidden">取消</button>
+        <button id="openBtn" class="btn ghost" disabled>打开目录</button>
+        <span id="status" class="status"></span>
+      </div>
+      <div class="progress"><div id="bar" class="bar"></div></div>
+      <div id="stats" class="stats"></div>
+    </section>
+
+    <section class="card log-card">
+      <label class="lbl">下载日志</label>
+      <div id="log" class="log"></div>
+    </section>
+
+    <section id="summary" class="card hidden"></section>
+
+    <footer class="foot">解析/下载走 music-api.gdstudio.xyz · VIP 与无版权歌曲自动跳过并记录</footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

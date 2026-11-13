@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'main.js'
+      - 'preload.js'
+      - 'downloader.js'
+      - 'ui/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build NSIS installer
+        run: npm run dist
+
+      - name: Verify artifact
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem out-electron/*.exe | Select-Object -First 1
+          if (-not $exe) { throw 'installer not produced' }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          "$($exe.Name)  $([math]::Round($exe.Length / 1MB, 1)) MB"
+          "sha256 $hash"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- $($exe.Name) - $([math]::Round($exe.Length / 1MB, 1)) MB - sha256 $hash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeteaseMusicDownloader-Setup
+          path: out-electron/*.exe
+          if-no-files-found: error
+
+      - name: Attach to release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out-electron/*.exe
+          generate_release_notes: true

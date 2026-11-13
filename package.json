@@ -1,0 +1,58 @@
+{
+  "name": "netease-music-downloader",
+  "productName": "网易云音乐下载器",
+  "version": "1.0.0",
+  "description": "基于 GD 音乐台 API 的网易云歌单下载器（Electron GUI），支持歌单解析、批量下载、音质选择、跳过清单。",
+  "main": "main.js",
+  "author": "dkvkvk",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^38.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.dkvkvk.netease-music-downloader",
+    "productName": "网易云音乐下载器",
+    "copyright": "Copyright © 2026 dkvkvk",
+    "directories": {
+      "output": "out-electron"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "downloader.js",
+      "ui/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "NeteaseMusicDownloader-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "网易云音乐下载器",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "网易云音乐下载器",
+      "installerLanguages": [
+        "zh_CN"
+      ]
+    }
+  }
+}

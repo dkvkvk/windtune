@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 1024 1024"
+     role="img" aria-label="全平台音乐下载器">
+  <defs>
+    <linearGradient id="nmd-base" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f8df7"/>
+      <stop offset="1" stop-color="#7c5cf7"/>
+    </linearGradient>
+    <radialGradient id="nmd-glow" cx="340" cy="116" r="660" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="225" fill="url(#nmd-base)"/>
+  <rect width="1024" height="1024" rx="225" fill="url(#nmd-glow)"/>
+  <g stroke="#ffffff" stroke-linecap="round" fill="none">
+    <line x1="436.21" y1="644.3" x2="436.21" y2="234.07" stroke-width="114.86"/>
+    <line x1="721.32" y1="346.88" x2="721.32" y2="629.94" stroke-width="123.07"/>
+  </g>
+  <g fill="#ffffff" stroke="none">
+    <ellipse cx="319.3" cy="668.91" rx="139.48" ry="108.71" transform="rotate(-22 319.3 668.91)"/>
+    <polygon points="427.85,288.82 438.69,289.03 448.79,289.6 458.15,290.51 466.82,291.72 474.82,293.24 482.2,295.03 489.04,297.12 495.4,299.51 501.35,302.25 506.96,305.39 512.28,309.01 517.36,313.21 522.2,318.09 526.78,323.72 531.05,330.18 534.98,337.52 538.49,345.76 541.54,354.9 544.09,364.94 546.13,375.86 547.7,387.66 549.17,400.38 573.49,404.15 578.36,390.9 581.92,377.75 584.54,364.73 586.28,351.85 587.1,339.09 586.97,326.45 585.85,313.92 583.68,301.53 580.4,289.33 575.97,277.39 570.38,265.79 563.63,254.64 555.76,244.01 546.81,234 536.87,224.66 526,216.03 514.27,208.13 501.76,200.97 488.49,194.52 474.53,188.78 459.88,183.72 444.58,179.33"/>
+    <circle cx="561.33" cy="402.26" r="12.31"/>
+  </g>
+  <g fill="#ffffff" stroke="#ffffff" stroke-linejoin="round">
+    <polygon points="721.32,835.05 614.66,627.89 827.98,627.89" stroke-width="24.61"/>
+  </g>
+</svg>

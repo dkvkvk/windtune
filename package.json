@@ -1,22 +1,32 @@
 {
   "name": "netease-music-downloader",
-  "productName": "网易云音乐下载器",
-  "version": "1.0.0",
-  "description": "基于 GD 音乐台 API 的网易云歌单下载器（Electron GUI），支持歌单解析、批量下载、音质选择、跳过清单。",
+  "productName": "全平台音乐下载器",
+  "version": "2.0.0",
+  "description": "全平台音乐下载器（Electron GUI）：网易云、QQ音乐、酷狗、酷我、JOOX、咪咕 一处搜索，批量下载音频/歌词/封面，支持无损与跨平台补链。",
   "main": "main.js",
   "author": "dkvkvk",
   "license": "MIT",
+  "keywords": [
+    "electron",
+    "music",
+    "downloader",
+    "netease",
+    "kugou",
+    "kuwo"
+  ],
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis --publish never"
+    "test": "node test/e2e.js",
+    "icon": "node tools/make-icon.js",
+    "dist": "node tools/make-icon.js && electron-builder --win nsis --publish never"
   },
   "devDependencies": {
     "electron": "^38.2.0",
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.dkvkvk.netease-music-downloader",
-    "productName": "网易云音乐下载器",
+    "appId": "com.dkvkvk.all-music-downloader",
+    "productName": "全平台音乐下载器",
     "copyright": "Copyright © 2026 dkvkvk",
     "directories": {
       "output": "out-electron"
@@ -25,10 +35,13 @@
       "main.js",
       "preload.js",
       "downloader.js",
+      "src/**/*",
       "ui/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -37,7 +50,7 @@
           ]
         }
       ],
-      "artifactName": "NeteaseMusicDownloader-Setup-${version}.exe"
+      "artifactName": "AllMusicDownloader-Setup-${version}.exe"
     },
     "nsis": {
       "oneClick": false,
@@ -46,10 +59,12 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "网易云音乐下载器",
+      "shortcutName": "全平台音乐下载器",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "uninstallDisplayName": "网易云音乐下载器",
+      "uninstallDisplayName": "全平台音乐下载器",
       "installerLanguages": [
         "zh_CN"
       ]

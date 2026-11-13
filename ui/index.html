@@ -1,76 +1,245 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
-  <title>网易云音乐下载器</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>全平台音乐下载器</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app">
-    <header>
-      <h1>网易云音乐下载器</h1>
-      <p class="sub">基于 GD 音乐台 API · 歌单批量下载 · 仅供个人学习使用</p>
+  <div class="backdrop" aria-hidden="true"></div>
+
+  <div class="shell">
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <span class="brand-fallback">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M9 18V6.4l9-1.9v11.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="6.6" cy="18" r="2.4" stroke="currentColor" stroke-width="1.7" />
+              <circle cx="15.6" cy="15.8" r="2.4" stroke="currentColor" stroke-width="1.7" />
+            </svg>
+          </span>
+          <img id="brandLogo" class="brand-logo" src="../assets/logo.svg" alt="" width="32" height="32" referrerpolicy="no-referrer" />
+        </div>
+        <div class="brand-text">
+          <h1>全平台音乐下载器</h1>
+          <p>网易云 · QQ音乐 · 酷狗 · 酷我 · 咪咕 · JOOX　聚合搜索与批量下载</p>
+        </div>
+      </div>
+      <div class="topbar-side">
+        <div class="health" id="health" aria-label="平台可用性"></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnCheck">
+          <svg class="i" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            <path d="M20 4.5V9h-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>检测平台</span>
+        </button>
+        <span class="version" id="version">v1.0.0</span>
+      </div>
     </header>
 
-    <section class="card">
-      <label class="lbl">歌单链接或 ID</label>
-      <div class="row">
-        <input id="input" type="text" placeholder="粘贴网易云歌单链接（https://music.163.com/playlist?id=...）或直接输入数字 ID">
-        <button id="parseBtn" class="btn">解析歌单</button>
-      </div>
-      <div id="playlistInfo" class="info hidden"></div>
-    </section>
+    <main class="grid">
 
-    <section class="card">
-      <label class="lbl">输出目录</label>
-      <div class="row">
-        <input id="outDir" type="text" placeholder="选择下载保存目录">
-        <button id="chooseBtn" class="btn ghost">选择目录</button>
-      </div>
-      <div class="row opts">
-        <div class="opt">
-          <label class="lbl">音质</label>
-          <select id="br">
-            <option value="320">320k（优先）</option>
-            <option value="192">192k</option>
-            <option value="128">128k</option>
-          </select>
+      <!-- 01 搜索 -->
+      <section class="card card--search" aria-labelledby="hSearch">
+        <div class="card-head">
+          <span class="step">01</span>
+          <div class="head-text">
+            <h2 id="hSearch">搜索</h2>
+            <p>关键词跨平台并行检索</p>
+          </div>
         </div>
-        <div class="opt">
-          <label class="lbl">并发数</label>
-          <select id="concurrency">
-            <option>1</option>
-            <option>2</option>
-            <option selected>3</option>
-            <option>4</option>
-            <option>5</option>
-            <option>6</option>
-          </select>
+        <div class="row">
+          <label class="field" for="q">
+            <svg class="field-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.6" stroke="currentColor" stroke-width="1.8" />
+              <path d="M16 16l4.2 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+            <input id="q" class="input" type="text" placeholder="歌名 / 歌手 / 专辑，例如「晴天」" autocomplete="off" spellcheck="false" />
+          </label>
+          <button type="button" class="btn btn-primary" id="btnSearch">搜索</button>
         </div>
-      </div>
-    </section>
+        <div class="chips" id="chips" role="group" aria-label="平台选择"></div>
+      </section>
 
-    <section class="card">
-      <div class="row">
-        <button id="startBtn" class="btn primary" disabled>开始下载</button>
-        <button id="cancelBtn" class="btn danger hidden">取消</button>
-        <button id="openBtn" class="btn ghost" disabled>打开目录</button>
-        <span id="status" class="status"></span>
-      </div>
-      <div class="progress"><div id="bar" class="bar"></div></div>
-      <div id="stats" class="stats"></div>
-    </section>
+      <!-- 02 链接 / ID -->
+      <section class="card card--link" aria-labelledby="hLink">
+        <div class="card-head">
+          <span class="step">02</span>
+          <div class="head-text">
+            <h2 id="hLink">链接 / ID</h2>
+            <p>粘贴歌单、专辑或单曲链接</p>
+          </div>
+        </div>
+        <div class="row">
+          <label class="field" for="link">
+            <svg class="field-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M10 13.6a4 4 0 0 0 5.66 0l2.3-2.3a4 4 0 0 0-5.65-5.66l-1.3 1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              <path d="M14 10.4a4 4 0 0 0-5.66 0l-2.3 2.3a4 4 0 0 0 5.65 5.66l1.3-1.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+            <input id="link" class="input" type="text" placeholder="https://music.163.com/playlist?id=…" autocomplete="off" spellcheck="false" />
+          </label>
+          <button type="button" class="btn btn-soft" id="btnResolve">解析</button>
+        </div>
+        <div class="resolve-slot" id="resolveSlot">
+          <p class="hint">支持网易云 / QQ音乐 / 酷狗 / 酷我 / 咪咕 / JOOX 的歌单、专辑与单曲页面，也可直接粘贴数字 ID。</p>
+        </div>
+      </section>
 
-    <section class="card log-card">
-      <label class="lbl">下载日志</label>
-      <div id="log" class="log"></div>
-    </section>
+      <!-- 03 结果列表 -->
+      <section class="card card--wide card--results" aria-labelledby="hResults">
+        <div class="card-head">
+          <span class="step">03</span>
+          <div class="head-text head-text--grow">
+            <h2 id="hResults">结果列表</h2>
+            <p id="resultSub">搜索或解析后在此显示曲目</p>
+          </div>
+          <div class="head-actions">
+            <span class="pill" id="totalPill">共 0 首</span>
+            <span class="pill pill--primary" id="selPill">已选 0 首</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnAll">全选</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnNone">清空</button>
+          </div>
+        </div>
 
-    <section id="summary" class="card hidden"></section>
+        <div class="table" id="table">
+          <div class="tr tr--head" role="row">
+            <label class="cb cb--head">
+              <input type="checkbox" id="chkAll" aria-label="全选" />
+              <span class="cb-box">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              </span>
+            </label>
+            <span class="th-cover"></span>
+            <span>歌曲</span>
+            <span>专辑</span>
+            <span>来源</span>
+            <span>时长</span>
+            <span>状态</span>
+          </div>
+          <div class="tbody" id="tbody"></div>
+        </div>
+      </section>
 
-    <footer class="foot">解析/下载走 music-api.gdstudio.xyz · VIP 与无版权歌曲自动跳过并记录</footer>
+      <!-- 04 下载设置 -->
+      <section class="card card--wide card--settings" aria-labelledby="hSettings">
+        <div class="card-head">
+          <span class="step">04</span>
+          <div class="head-text">
+            <h2 id="hSettings">下载设置</h2>
+            <p>输出目录、音质、并发与附加文件</p>
+          </div>
+        </div>
+        <div class="settings-bar">
+          <div class="set-item set-item--dir">
+            <span class="set-label">输出目录</span>
+            <span class="path" id="dirPath" title="输出目录">未选择</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnDir">选择</button>
+          </div>
+          <span class="set-div"></span>
+          <label class="set-item">
+            <span class="set-label">音质</span>
+            <span class="select-wrap">
+              <select id="br" class="select">
+                <option value="999">999 无损</option>
+                <option value="740">740 kbps</option>
+                <option value="320" selected>320 kbps</option>
+                <option value="192">192 kbps</option>
+                <option value="128">128 kbps</option>
+              </select>
+            </span>
+          </label>
+          <label class="set-item">
+            <span class="set-label">并发</span>
+            <span class="select-wrap">
+              <select id="concurrency" class="select select--narrow">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3" selected>3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="8">8</option>
+              </select>
+            </span>
+          </label>
+          <span class="set-div"></span>
+          <div class="set-toggles">
+            <label class="toggle">
+              <input type="checkbox" id="saveLyric" checked />
+              <span class="toggle-track"></span>
+              <span class="toggle-text">歌词 .lrc</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="saveCover" checked />
+              <span class="toggle-track"></span>
+              <span class="toggle-text">封面 .jpg</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="fallback" checked />
+              <span class="toggle-track"></span>
+              <span class="toggle-text">跨平台补链</span>
+            </label>
+          </div>
+          <button type="button" class="btn btn-primary btn-lg" id="btnStart" disabled>开始下载</button>
+        </div>
+      </section>
+
+      <!-- 05 下载进度 -->
+      <section class="card card--wide card--download" id="dlCard" aria-labelledby="hDl">
+        <div class="card-head">
+          <span class="step">05</span>
+          <div class="head-text head-text--grow">
+            <h2 id="hDl">下载进度</h2>
+            <p id="dlSub">设置好目录与音质后，点击「开始下载」</p>
+          </div>
+          <span class="chip chip--idle" id="dlState">未开始</span>
+        </div>
+
+        <div class="dl-grid">
+          <div class="dl-main">
+            <div class="progress" role="progressbar" aria-label="下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress">
+              <div class="progress-fill" id="progFill"></div>
+            </div>
+            <div class="dl-meta">
+              <div class="metric"><span class="k">已选</span><b id="mSel">0</b></div>
+              <div class="metric"><span class="k">完成</span><b id="mDone" class="ok">0</b></div>
+              <div class="metric"><span class="k">跳过</span><b id="mSkip" class="warn">0</b></div>
+              <div class="metric"><span class="k">进度</span><b id="mPct">0%</b></div>
+              <div class="dl-actions">
+                <button type="button" class="btn btn-ghost btn-sm" id="btnCancel" disabled>取消</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnOpen" disabled>打开目录</button>
+              </div>
+            </div>
+            <p class="dl-note" id="dlNote">等待开始。下载过程中可随时取消，已完成的部分会保留。</p>
+
+            <div class="summary" id="summary" hidden></div>
+          </div>
+
+          <div class="dl-log">
+            <div class="log-head">
+              <span>逐曲日志</span>
+              <span class="log-count" id="logCount">0 条</span>
+            </div>
+            <div class="log-list" id="logList"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="foot">
+      <span>本工具仅用于个人学习与备份，请遵守各音乐平台的服务条款。</span>
+    </footer>
+
   </div>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
   <script src="app.js"></script>
 </body>
 </html>

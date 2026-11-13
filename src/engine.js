@@ -327,6 +327,7 @@ async function downloadTracks(opts, onProgress, signal) {
 
   const bitrateDistribution = {};
   const sourceDistribution = {};
+  const viaDistribution = {};
   let lyricCount = 0;
   let coverCount = 0;
   for (const r of results) {
@@ -334,6 +335,7 @@ async function downloadTracks(opts, onProgress, signal) {
     const k = String(r.br || 0);
     bitrateDistribution[k] = (bitrateDistribution[k] || 0) + 1;
     sourceDistribution[r.source] = (sourceDistribution[r.source] || 0) + 1;
+    viaDistribution[r.via || r.source] = (viaDistribution[r.via || r.source] || 0) + 1;
     if (r.lyric) lyricCount++;
     if (r.cover) coverCount++;
   }
@@ -348,6 +350,7 @@ async function downloadTracks(opts, onProgress, signal) {
     cancelled: cancelled(),
     bitrateDistribution,
     sourceDistribution,
+    viaDistribution,
     lyricCount,
     coverCount,
     skippedList: results.filter((r) => r && !r.ok).map((r) => ({ name: r.name, source: r.source, reason: r.reason })),

@@ -448,27 +448,56 @@
       '</div>';
   }
 
-  function distHtml(summary) {
-    const srcDist = summary.sourceDistribution || {};
-    const brDist = summary.bitrateDistribution || {};
-    const srcKeys = Object.keys(srcDist);
-    const brKeys = Object.keys(brDist);
-    if (!srcKeys.length && !brKeys.length) return '';
-
-    let html = '<div class="dist"><span class="dist-label">来源</span>';
-    html += srcKeys.map(function (key) {
+  /* 分布一行：● 网易云 4 · ● 酷我 2（用平台色点替代宽徽章，一行放得下） */
+  function distRow(label, dist, withDot) {
+    const keys = Object.keys(dist || {});
+    if (!keys.length) return '';
+    const items = keys.map(function (key) {
       const src = SRC[key] || { id: 'unknown', label: key };
-      return '<span class="badge badge--' + esc(src.id) + '">' + esc(src.label) + ' ×' + esc(srcDist[key]) + '</span>';
+      const dot = withDot ? '<i class="pl-dot" data-source="' + esc(src.id) + '"></i>' : '';
+      return '<span class="src">' + dot + esc(src.label) + '<b>' + esc(dist[key]) + '</b></span>';
     }).join('');
+    return '<div class="dist-row"><span class="dist-label">' + esc(label) + '</span>' + items + '</div>';
+  }
 
-    if (brKeys.length) {
-      html += '<span class="dist-label">音质</span>';
-      html += brKeys.map(function (key) {
-        return '<span class="badge badge--unknown">' + esc(key) + 'k ×' + esc(brDist[key]) + '</span>';
-      }).join('');
+  function sameDist(a, b) {
+    const ka = Object.keys(a || {}).sort();
+    const kb = Object.keys(b || {}).sort();
+    if (ka.length !== kb.length) return false;
+    for (let i = 0; i < ka.length; i += 1) {
+      if (ka[i] !== kb[i]) return false;
+      if (Number(a[ka[i]]) !== Number(b[kb[i]])) return false;
+    }
+    return true;
+  }
+
+  function distHtml(summary, skips) {
+    const srcDist = summary.sourceDistribution || {};
+    const viaDist = summary.viaDistribution || {};
+    const brDist = summary.bitrateDistribution || {};
+    const rows = [];
+    const tail = skips || '';
+
+    if (Object.keys(srcDist).length) rows.push(distRow('结果来源', srcDist, true));
+    /* 发生跨平台补链时，「结果来源」和「下载源」不是一回事，两个都写出来 */
+    if (Object.keys(viaDist).length && !sameDist(srcDist, viaDist)) {
+      rows.push(distRow('下载源', viaDist, true));
     }
 
-    return html + '</div>';
+    if (Object.keys(brDist).length) {
+      const brItems = Object.keys(brDist).map(function (key) {
+        return '<span class="src">' + esc(key) + 'k<b>×' + esc(brDist[key]) + '</b></span>';
+      }).join('');
+      rows.push('<div class="dist-row"><span class="dist-label">音质</span>' + brItems + tail + '</div>');
+      return rows.join('');
+    }
+
+    if (rows.length) {
+      rows[rows.length - 1] = rows[rows.length - 1].replace(/<\/div>$/, tail + '</div>');
+    } else if (tail) {
+      rows.push('<div class="dist-row">' + tail + '</div>');
+    }
+    return rows.join('');
   }
 
   function renderSummary(summary) {
@@ -493,10 +522,10 @@
 
     els.summary.innerHTML =
       '<div class="sum-head">' +
-      '<div class="head-text head-text--grow">' +
       '<h3>' + (cancelled ? '下载已取消' : '下载完成') + '</h3>' +
-      '<p>' + esc(summary.title || '') + ' · 共 ' + (summary.total || 0) + ' 首 · 输出 ' + esc(shortPath(summary.outDir)) + '</p>' +
-      '</div>' +
+      '<span class="sum-meta">' + esc(summary.title || '') + ' · 共 ' + (summary.total || 0) +
+      ' 首 · ' + esc(shortPath(summary.outDir)) + '</span>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="btnOpenSum">打开目录</button>' +
       '<span class="chip ' + (cancelled ? 'chip--warn' : 'chip--ok') + '">' + (cancelled ? '已取消' : '已完成') + '</span>' +
       '</div>' +
       '<div class="stats">' +
@@ -507,8 +536,7 @@
       statTile('总大小', fmtMB(summary.totalMB), 'stat--neutral') +
       statTile('平均音质', avgBitrate(summary.bitrateDistribution), 'stat--neutral') +
       '</div>' +
-      distHtml(summary) +
-      skips;
+      '<div class="sum-foot">' + distHtml(summary, skips) + '</div>';
   }
 
   function hideSummary() {
@@ -988,6 +1016,11 @@
     els.btnCancel.addEventListener('click', cancelDownload);
     els.btnOpen.addEventListener('click', openDir);
 
+    /* 完成态下「打开目录」移进汇总卡头部，用事件委托绑定（innerHTML 会被重写） */
+    els.summary.addEventListener('click', function (ev) {
+      if (ev.target.closest('#btnOpenSum')) openDir();
+    });
+
     els.chkAll.addEventListener('change', function () {
       selectAllRows(els.chkAll.checked);
     });
@@ -1272,6 +1305,7 @@
             br: evt.br,
             bytes: evt.bytes,
             source: evt.source,
+            via: evt.via,
             name: evt.name,
             reason: evt.reason,
             lyric: evt.lyric,
@@ -1287,10 +1321,13 @@
           const bytes = okItems.reduce(function (sum, r) { return sum + (r.bytes || 0); }, 0);
           const bitrate = {};
           const sources = {};
+          const vias = {};
           okItems.forEach(function (r) {
             const key = String(r.br || 0);
             bitrate[key] = (bitrate[key] || 0) + 1;
             sources[r.source] = (sources[r.source] || 0) + 1;
+            const viaKey = r.via || r.source;
+            vias[viaKey] = (vias[viaKey] || 0) + 1;
           });
           return {
             title: title,
@@ -1304,6 +1341,7 @@
             cancelled: !!cancelled,
             bitrateDistribution: bitrate,
             sourceDistribution: sources,
+            viaDistribution: vias,
             skippedList: skipItems.map(function (r) {
               return { name: r.name, source: r.source, reason: r.reason };
             })

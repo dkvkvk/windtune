@@ -16,7 +16,7 @@
 
 ![界面](assets/screenshot.png)
 
-下载完成后：六格汇总（成功 / 跳过 / 歌词 / 封面 / 大小 / 平均音质）+ 结果来源与**实际下载源**
+下载完成后可查看成功、失败、歌词、封面、总大小和平均音质，以及**实际下载源**。
 分列显示（补链发生时两者不同）+ 右侧逐曲日志（`源 QQ音乐 → 补链网易云`，行尾 `L` `C` 标记歌词/封面是否落盘）：
 
 ![完成态](assets/screenshot-done.png)
@@ -51,8 +51,9 @@
 - **音质**：128 / 192 / 320 kbps / **无损（FLAC）**，取不到自动降档（例如 999→320→192→128）
 - **歌词 + 封面**：可选，随音频同名保存；平台自己没有就跨平台找
 - **跨平台补链**（默认开启）：QQ/酷狗的歌也能下
-- **并发下载** 1–8 路，实时逐曲日志（OK / SKIP 着色），可随时取消，已完成的部分保留
-- **失败不静默**：跳过的歌逐条记录原因，结束时写出 `_下载报告.json` 与 `_跳过清单.txt`
+- **并发下载** 1–8 路，逐曲记录成功或失败。手动取消时保留已下载的文件，结果显示未完成的曲目数。
+- **重试失败项**：一批下载结束后，在结果卡片点击「重试失败项」。只提交失败曲目，沿用原目录、音质、并发、补链及歌词和封面设置。若还有失败项，可以再次重试。手动取消的批次显示取消结果。
+- 每次尝试更新 `_下载报告.json` 中的结果，失败原因另记在 `_跳过清单.txt`。
 - 文件名自动清洗 Windows 非法字符，重名自动加序号
 - 浅色界面、原生无边框控件、contextIsolation 安全 IPC
 
@@ -60,19 +61,22 @@
 
 安装包由 GitHub Actions 云端构建（`.github/workflows/build.yml`）：
 
-- push 到 `main` 或打 `v*` tag 触发，也可手动 `workflow_dispatch`
-- `windows-latest` + Node 22 → `npm ci` → `npm run dist`（`electron-builder --win nsis`）
+- 构建相关改动提交到 `main` 或向 `main` 提交 PR 时触发，也可通过 `v*` tag 或手动触发
+- `windows-2025` + Node.js 24 → `npm ci` → 离线集成与下载重试检查 → `npm run dist`（`electron-builder --win nsis`）
 - 校验 sha256、上传 artifact；`v*` tag 自动发 Release
 
 产物：`out-electron/WindTune-Setup-<version>.exe`
 
-> 本地无需运行 Electron（部分机器 dev 模式 Electron 会崩溃），exe 一律交给 CI 构建。
+> Windows 本地开发建议使用纯英文检出路径（如 `C:\src\windtune`）。含中文的路径可能导致 Electron 启动失败，或使 NSIS 无法创建临时文件。
 
 ## 本地开发
 
+使用 Node.js 24 LTS。
+
 ```bash
-npm install
+npm ci
 npm start          # 运行（需本地 Electron 可用）
+node test/check-download-retry.js  # 用离线样本验证桌面端重试与取消
 node test/e2e.js   # 只测引擎（搜索 / 歌单 / 真下载），不需要 Electron
 node tools/make-icon.js   # 重新生成图标（零依赖，纯 Node）
 npm run dist       # 打包 NSIS 安装包到 out-electron/

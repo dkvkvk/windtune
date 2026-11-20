@@ -22,8 +22,8 @@
     "check-api": "node scripts/check-api.js"
   },
   "devDependencies": {
-    "electron": "^38.2.0",
-    "electron-builder": "^26.0.12"
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.1"
   },
   "build": {
     "appId": "com.dkvkvk.windtune",

@@ -51,9 +51,9 @@
     running: false,
     dir: '',
     summary: null,
+    retryOptions: null,
     run: { total: 0, done: 0, ok: 0, skip: 0, selected: 0, title: '' },
     rowEls: new Map(),
-    nameIndex: new Map(),
     logCount: 0,
     lastQuery: ''
   };
@@ -303,14 +303,11 @@
 
   function indexRows() {
     state.rowEls = new Map();
-    state.nameIndex = new Map();
     const rows = els.tbody.querySelectorAll('.tr--row');
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
       const key = row.getAttribute('data-key');
       state.rowEls.set(key, row);
-      const track = state.trackMap.get(key);
-      if (track) state.nameIndex.set(String(track.source) + ':' + String(track.name), key);
     }
   }
 
@@ -413,7 +410,7 @@
     if (kind === 'skip') row.classList.add('is-skip');
     const cell = row.querySelector('.col-status');
     if (cell) {
-      const text = { done: '完成', skip: '跳过', fail: '失败', run: '下载中' }[kind] || '待下载';
+      const text = { done: '完成', skip: '失败', fail: '失败', run: '下载中' }[kind] || '待下载';
       cell.innerHTML = '<span class="st st--' + esc(kind) + '">' + text + '</span>';
     }
   }
@@ -508,9 +505,10 @@
 
     const cancelled = !!summary.cancelled;
     const skippedList = summary.skippedList || [];
+    const cancelledCount = summary.total - summary.success - summary.skipped;
 
     const skips = skippedList.length
-      ? '<details class="skips"><summary>跳过清单 · ' + skippedList.length + ' 首</summary><ul>' +
+      ? '<details class="skips"><summary>失败清单 · ' + skippedList.length + ' 首</summary><ul>' +
         skippedList.map(function (item) {
           const src = SRC[item.source] || { id: 'unknown', label: item.source || '未知' };
           return '<li><span class="badge badge--' + esc(src.id) + '">' + esc(src.label) + '</span>' +
@@ -522,15 +520,16 @@
 
     els.summary.innerHTML =
       '<div class="sum-head">' +
-      '<h3>' + (cancelled ? '下载已取消' : '下载完成') + '</h3>' +
+      '<h3>' + (cancelled ? '下载已取消' : (state.run.retry ? '重试结果' : '下载结果')) + '</h3>' +
       '<span class="sum-meta">' + esc(summary.title || '') + ' · 共 ' + (summary.total || 0) +
-      ' 首 · ' + esc(shortPath(summary.outDir)) + '</span>' +
+      ' 首' + (cancelled ? ' · 未完成 ' + cancelledCount + ' 首' : '') + ' · ' + esc(shortPath(summary.outDir)) + '</span>' +
+      (state.retryOptions ? '<button type="button" class="btn btn-primary btn-sm" id="btnRetryFailed">重试失败项</button>' : '') +
       '<button type="button" class="btn btn-ghost btn-sm" id="btnOpenSum">打开目录</button>' +
       '<span class="chip ' + (cancelled ? 'chip--warn' : 'chip--ok') + '">' + (cancelled ? '已取消' : '已完成') + '</span>' +
       '</div>' +
       '<div class="stats">' +
       statTile('成功', summary.success || 0, '') +
-      statTile('跳过', summary.skipped || 0, 'stat--warn') +
+      statTile('失败', summary.skipped || 0, 'stat--warn') +
       statTile('歌词', summary.lyricCount || 0, 'stat--neutral') +
       statTile('封面', summary.coverCount || 0, 'stat--neutral') +
       statTile('总大小', fmtMB(summary.totalMB), 'stat--neutral') +
@@ -541,6 +540,7 @@
 
   function hideSummary() {
     state.summary = null;
+    state.retryOptions = null;
     els.summary.hidden = true;
     els.summary.innerHTML = '';
     if (els.dlCard) els.dlCard.classList.remove('is-done');
@@ -567,18 +567,17 @@
    * ------------------------------------------------------------------ */
 
   function handleProgress(evt) {
-    if (!evt || typeof evt !== 'object') return;
+    if (!state.running || !evt || typeof evt !== 'object') return;
 
     if (evt.type === 'start') {
-      state.running = true;
       state.run.total = Number(evt.total) || 0;
       state.run.selected = state.run.selected || state.run.total;
       state.run.title = evt.title || '';
-      setDlState('run', '下载中');
-      els.dlSub.textContent = '正在下载：' + (evt.title || '') + ' · 共 ' + state.run.total + ' 首';
-      els.btnCancel.disabled = false;
-      els.btnOpen.disabled = !state.dir;
-      pushLog('info', '开始下载', (evt.title || '') + ' · ' + state.run.total + ' 首 · ' + shortPath(evt.outDir));
+      if (!els.btnCancel.disabled) {
+        els.dlSub.textContent = (state.run.retry ? '正在重试：' : '正在下载：') + (evt.title || '') + ' · 共 ' + state.run.total + ' 首';
+      }
+      pushLog('info', state.run.retry ? '重试失败项' : '开始下载',
+        (evt.title || '') + ' · ' + state.run.total + ' 首 · ' + shortPath(evt.outDir));
       renderProgress();
       updateSelectionUI();
       return;
@@ -590,33 +589,33 @@
       if (evt.ok) state.run.ok += 1;
       else state.run.skip += 1;
 
-      const key = state.nameIndex.get(String(evt.source) + ':' + String(evt.name));
-      if (key) markRow(key, evt.ok ? 'done' : 'skip');
+      if (evt.key) markRow(evt.key, evt.ok ? 'done' : 'skip');
 
-      pushLog(evt.ok ? 'ok' : 'skip', evt.name, trackNote(evt), evt.ok ? { lyric: evt.lyric, cover: evt.cover } : null);
+      pushLog(evt.ok ? 'ok' : 'fail', evt.name, trackNote(evt), evt.ok ? { lyric: evt.lyric, cover: evt.cover } : null);
       els.dlNote.textContent = evt.ok
         ? '正在处理：' + evt.name + '（' + viaLabel(evt) + '）'
-        : '跳过：' + evt.name + '（' + (evt.reason || '无法获取直链') + '）';
+        : '失败：' + evt.name + '（' + (evt.reason || '无法获取直链') + '）';
       renderProgress();
-      return;
     }
+  }
 
-    if (evt.type === 'done') {
-      const summary = evt.summary || {};
-      state.running = false;
-      if (summary.total) state.run.total = summary.total;
-      state.run.done = (summary.success || 0) + (summary.skipped || 0) || state.run.done;
+  function finishDownload(summary, opts) {
+    const failed = (summary.skippedList || []).map(function (item) {
+      return opts.tracks[item.index];
+    }).filter(Boolean);
+    state.retryOptions = !summary.cancelled && failed.length ? { ...opts, tracks: failed, retry: true } : null;
+    state.run.total = summary.total;
+    state.run.ok = summary.success;
+    state.run.skip = summary.skipped;
+    state.run.done = summary.success + summary.skipped;
 
-      setDlState(summary.cancelled ? 'warn' : 'ok', summary.cancelled ? '已取消' : '已完成');
-      els.dlSub.textContent = '任务结束：成功 ' + (summary.success || 0) + ' 首 · 跳过 ' + (summary.skipped || 0) + ' 首';
-      els.btnCancel.disabled = true;
-      els.btnOpen.disabled = !summary.outDir;
-      pushLog('info', '结束', '成功 ' + (summary.success || 0) + ' · 跳过 ' + (summary.skipped || 0) + ' · ' + fmtMB(summary.totalMB));
-      els.dlNote.textContent = '已完成。可在输出目录中查看下载的音频、歌词与封面。';
-      renderProgress();
-      renderSummary(summary);
-      updateSelectionUI();
-    }
+    const status = summary.cancelled ? '已取消' : '已完成';
+    const counts = '成功 ' + summary.success + ' 首 · 失败 ' + summary.skipped + ' 首';
+    setDlState(summary.cancelled ? 'warn' : 'ok', status);
+    els.dlSub.textContent = status + ' · ' + counts;
+    pushLog('info', status, counts + ' · ' + fmtMB(summary.totalMB));
+    renderProgress();
+    renderSummary(summary);
   }
 
   /* ------------------------------------------------------------------ *
@@ -831,20 +830,18 @@
     }
   }
 
-  function resetDownloadUI() {
-    state.run = { total: 0, done: 0, ok: 0, skip: 0, selected: state.selected.size, title: '' };
+  function resetDownloadUI(opts) {
+    state.run = {
+      total: opts.tracks.length, done: 0, ok: 0, skip: 0, selected: opts.tracks.length, title: '', retry: !!opts.retry
+    };
     resetLog();
     hideSummary();
     els.dlNote.textContent = '正在准备下载…';
     els.dlSub.textContent = '准备中';
     renderProgress();
 
-    const rows = els.tbody.querySelectorAll('.tr--row');
-    for (let i = 0; i < rows.length; i += 1) {
-      rows[i].classList.remove('is-done', 'is-skip');
-      const cell = rows[i].querySelector('.col-status');
-      if (cell) cell.innerHTML = '<span class="st st--wait">待下载</span>';
-    }
+    const keys = opts.retry ? opts.tracks.map(keyOf) : state.rowEls.keys();
+    for (const key of keys) markRow(key, 'wait');
   }
 
   async function startDownload() {
@@ -875,12 +872,17 @@
       saveCover: els.saveCover.checked
     };
 
-    resetDownloadUI();
+    await runDownload(opts);
+  }
+
+  async function runDownload(opts) {
+    if (state.running) return;
+    const previousSummary = opts.retry ? state.summary : null;
+    const previousRun = state.run;
     state.running = true;
-    state.run.total = picked.length;
-    state.run.selected = picked.length;
+    resetDownloadUI(opts);
     setDlState('run', '下载中');
-    els.dlSub.textContent = '正在下载 · 共 ' + picked.length + ' 首';
+    els.dlSub.textContent = (opts.retry ? '正在重试' : '正在下载') + ' · 共 ' + opts.tracks.length + ' 首';
     els.btnCancel.disabled = false;
     els.btnOpen.disabled = false;
     updateSelectionUI();
@@ -888,22 +890,20 @@
 
     try {
       const res = await api.startDownload(opts);
-      if (res && res.ok === false) {
-        state.running = false;
-        setDlState('err', '失败');
-        els.dlSub.textContent = '下载失败';
-        els.dlNote.textContent = res.error || '下载失败';
-        pushLog('fail', '任务失败', res.error || '未知错误');
-        toast('下载失败：' + (res.error || '未知错误'), 'error');
-      } else if (res && res.summary && !state.summary) {
-        renderSummary(res.summary);
-      }
+      if (!res?.ok || !res.summary) throw new Error(res?.error || '下载失败');
+      finishDownload(res.summary, opts);
     } catch (err) {
-      state.running = false;
       setDlState('err', '失败');
       els.dlSub.textContent = '下载失败';
+      els.dlNote.textContent = errText(err);
       pushLog('fail', '任务失败', errText(err));
       toast('下载失败：' + errText(err), 'error');
+      if (previousSummary) {
+        state.retryOptions = opts;
+        state.run = previousRun;
+        for (const track of opts.tracks) markRow(keyOf(track), 'skip');
+        renderSummary(previousSummary);
+      }
     } finally {
       state.running = false;
       els.btnCancel.disabled = true;
@@ -912,22 +912,24 @@
   }
 
   async function cancelDownload() {
+    if (!state.running || els.btnCancel.disabled) return;
+    const run = state.run;
+    els.btnCancel.disabled = true;
+    setDlState('warn', '正在取消');
+    els.dlSub.textContent = '正在取消，已完成的部分会保留';
     try {
       await api.cancelDownload();
-      state.running = false;
-      setDlState('warn', '已取消');
-      els.dlSub.textContent = '已取消，已完成的部分会保留';
-      els.dlNote.textContent = '任务已取消。';
-      els.btnCancel.disabled = true;
-      pushLog('info', '已取消', '用户中止了当前下载任务');
-      updateSelectionUI();
     } catch (err) {
+      if (state.running && state.run === run) {
+        els.btnCancel.disabled = false;
+        setDlState('run', '下载中');
+        els.dlSub.textContent = '正在下载 · 共 ' + run.total + ' 首';
+      }
       toast('取消失败：' + errText(err), 'error');
     }
   }
 
-  async function openDir() {
-    const dir = state.dir || (state.summary && state.summary.outDir) || '';
+  async function openDir(dir) {
     if (!dir) return;
     try {
       const ok = await api.openDir(dir);
@@ -1060,11 +1062,12 @@
     els.btnDir.addEventListener('click', chooseDir);
     els.btnStart.addEventListener('click', startDownload);
     els.btnCancel.addEventListener('click', cancelDownload);
-    els.btnOpen.addEventListener('click', openDir);
+    els.btnOpen.addEventListener('click', function () { openDir(state.dir); });
 
-    /* 完成态下「打开目录」移进汇总卡头部，用事件委托绑定（innerHTML 会被重写） */
+    /* 汇总卡的按钮在每次渲染时重建。 */
     els.summary.addEventListener('click', function (ev) {
-      if (ev.target.closest('#btnOpenSum')) openDir();
+      if (ev.target.closest('#btnOpenSum')) openDir(state.summary?.outDir);
+      if (ev.target.closest('#btnRetryFailed') && state.retryOptions) runDownload(state.retryOptions);
     });
 
     els.chkAll.addEventListener('change', function () {
@@ -1207,8 +1210,7 @@
     total: DEMO_TRACKS.length
   };
 
-  let demoTimer = null;
-  let demoCancelled = false;
+  let cancelDemoDownload = null;
 
   function demoItems() {
     return DEMO_TRACKS.map(function (t) {
@@ -1316,7 +1318,6 @@
         const outDir = (opts && opts.outDir) || 'D:\\Music\\全平台下载';
         const title = (opts && opts.title) || DEMO_PLAYLIST.title;
 
-        demoCancelled = false;
         emit({ type: 'start', title: title, total: total, outDir: outDir });
 
         const plan = tracks.map(function (track, index) {
@@ -1345,6 +1346,7 @@
             done: index + 1,
             total: total,
             ok: !item.skip,
+            key: keyOf(item.track),
             name: item.track.name,
             source: item.track.source,
             via: item.via,
@@ -1357,6 +1359,7 @@
           };
           results.push({
             ok: evt.ok,
+            index: index,
             br: evt.br,
             bytes: evt.bytes,
             source: evt.source,
@@ -1398,15 +1401,9 @@
             sourceDistribution: sources,
             viaDistribution: vias,
             skippedList: skipItems.map(function (r) {
-              return { name: r.name, source: r.source, reason: r.reason };
+              return { index: r.index, name: r.name, source: r.source, reason: r.reason };
             })
           };
-        }
-
-        if (demoMode === 'run') {
-          for (let i = 0; i < Math.min(6, plan.length); i += 1) emitOne(i);
-          /* 停在中途，方便截图查看进行中的状态 */
-          return new Promise(function () {});
         }
 
         if (demoMode === 'done') {
@@ -1418,34 +1415,37 @@
 
         return new Promise(function (resolve) {
           let index = 0;
-          const step = function () {
-            demoTimer = null;
-            if (demoCancelled) {
-              const summary = buildSummary(true);
-              emit({ type: 'done', summary: summary });
-              resolve({ ok: true, summary: summary });
-              return;
-            }
+          let timer;
+          function finish(cancelled) {
+            clearTimeout(timer);
+            cancelDemoDownload = null;
+            const summary = buildSummary(cancelled);
+            emit({ type: 'done', summary: summary });
+            resolve({ ok: true, summary: summary });
+          }
+          cancelDemoDownload = function () { finish(true); };
+
+          if (demoMode === 'run') {
+            for (let i = 0; i < Math.min(6, plan.length); i += 1) emitOne(i);
+            /* 停在中途，方便截图查看进行中的状态 */
+            return;
+          }
+
+          function step() {
             if (index >= plan.length) {
-              const summary = buildSummary(false);
-              emit({ type: 'done', summary: summary });
-              resolve({ ok: true, summary: summary });
+              finish(false);
               return;
             }
             emitOne(index);
             index += 1;
-            demoTimer = setTimeout(step, 260 + Math.random() * 220);
-          };
-          demoTimer = setTimeout(step, 220);
+            timer = setTimeout(step, 260 + Math.random() * 220);
+          }
+          timer = setTimeout(step, 220);
         });
       },
 
       cancelDownload: function () {
-        demoCancelled = true;
-        if (demoTimer) {
-          clearTimeout(demoTimer);
-          demoTimer = null;
-        }
+        if (cancelDemoDownload) cancelDemoDownload();
         return Promise.resolve(true);
       },
 

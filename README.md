@@ -60,18 +60,20 @@
 
 安装包由 GitHub Actions 云端构建（`.github/workflows/build.yml`）：
 
-- push 到 `main` 或打 `v*` tag 触发，也可手动 `workflow_dispatch`
-- `windows-latest` + Node 22 → `npm ci` → `npm run dist`（`electron-builder --win nsis`）
+- 构建相关改动提交到 `main` 或向 `main` 提交 PR 时触发，也可通过 `v*` tag 或手动触发
+- `windows-2025` + Node.js 24 → `npm ci` → 离线集成检查 → `npm run dist`（`electron-builder --win nsis`）
 - 校验 sha256、上传 artifact；`v*` tag 自动发 Release
 
 产物：`out-electron/WindTune-Setup-<version>.exe`
 
-> 本地无需运行 Electron（部分机器 dev 模式 Electron 会崩溃），exe 一律交给 CI 构建。
+> Windows 本地打包时，请将仓库检出到纯英文路径（如 `C:\src\windtune`）。NSIS 在含中文的路径中可能无法创建临时文件。
 
 ## 本地开发
 
+使用 Node.js 24 LTS。
+
 ```bash
-npm install
+npm ci
 npm start          # 运行（需本地 Electron 可用）
 node test/e2e.js   # 只测引擎（搜索 / 歌单 / 真下载），不需要 Electron
 node tools/make-icon.js   # 重新生成图标（零依赖，纯 Node）

@@ -99,6 +99,8 @@ ipcMain.handle('app:open-sources-dir', async () => {
 ipcMain.handle('app:choose-dir', async () => {
   const r = await dialog.showOpenDialog(win, {
     title: '选择下载保存目录',
+    // Electron 43 起，空路径会强制打开“下载”。Windows 下传相对路径可让系统恢复上次打开的目录。
+    defaultPath: process.platform === 'win32' ? '.' : undefined,
     properties: ['openDirectory', 'createDirectory'],
   });
   if (r.canceled || !r.filePaths.length) return null;

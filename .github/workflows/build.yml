@@ -14,6 +14,7 @@ on:
       - 'sources/**'
       - 'tools/**'
       - 'test/check-integration.js'
+      - 'test/check-download-retry.js'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/build.yml'
@@ -55,6 +56,9 @@ jobs:
 
       - name: Check IPC, assets, and packaging configuration
         run: node test/check-integration.js
+
+      - name: Check download retry and cancellation
+        run: node test/check-download-retry.js
 
       - name: Build NSIS installer
         run: npm run dist

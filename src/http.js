@@ -20,7 +20,7 @@ class HttpError extends Error {
  * @param {object} [opts.headers]
  * @param {string} [opts.referer]
  * @param {'text'|'json'|'buffer'} [opts.as]
- * @param {object} [opts.signal] { cancelled: boolean }
+ * @param {object} [opts.signal] { cancelled: boolean, abortSignal?: AbortSignal }
  */
 async function request(url, opts = {}) {
   const tries = Math.max(1, opts.retries == null ? 2 : opts.retries);
@@ -36,8 +36,9 @@ async function request(url, opts = {}) {
     if (opts.signal && opts.signal.cancelled) throw new HttpError('已取消', 0);
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeout);
+    const signal = opts.signal?.abortSignal ? AbortSignal.any([ac.signal, opts.signal.abortSignal]) : ac.signal;
     try {
-      const res = await fetch(url, { headers, signal: ac.signal, redirect: 'follow', method: opts.method || 'GET', body: opts.body });
+      const res = await fetch(url, { headers, signal, redirect: 'follow', method: opts.method || 'GET', body: opts.body });
       if (!res.ok) throw new HttpError('HTTP ' + res.status, res.status);
       if (opts.as === 'buffer') return { buf: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') || '' };
       const txt = await res.text();

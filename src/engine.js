@@ -372,7 +372,7 @@ async function downloadTracks(opts, onProgress, signal) {
   fs.mkdirSync(targetDir, { recursive: true });
 
   const cache = new Map();
-  const usedNames = new Set();
+  const usedNames = new Set(opts.retry ? fs.readdirSync(targetDir).map((name) => name.toLowerCase()) : []);
   const results = new Array(tracks.length);
   let idx = 0;
   let done = 0;
@@ -388,28 +388,34 @@ async function downloadTracks(opts, onProgress, signal) {
     const label = `${tr.artists.length ? tr.artists.join(', ') + ' - ' : ''}${tr.name}`;
     try {
       const meta = await resolveUrl(tr, br, fallback, signal, cache);
+      if (cancelled()) return null;
       if (!meta) {
         return { ok: false, name: label, source: tr.source, reason: '取不到可下载地址（版权/VIP 限制，或跨平台也没找到）' };
       }
       const audio = await fetchAudio(meta.url, signal);
+      if (cancelled()) return null;
       const ext = audio.ext || meta.ext || 'mp3';
 
-      let base = sanitize(label);
-      let fname = `${base}.${ext}`;
+      const base = sanitize(label);
+      const extensions = [ext, ...(wantLyric ? ['lrc'] : []), ...(wantCover ? ['jpg'] : [])];
+      let stem = base;
       let n = 1;
-      while (usedNames.has(fname.toLowerCase())) fname = `${base} (${n++}).${ext}`;
-      usedNames.add(fname.toLowerCase());
+      while (extensions.some((suffix) => usedNames.has(`${stem}.${suffix}`.toLowerCase()))) {
+        stem = `${base} (${n++})`;
+      }
+      const fname = `${stem}.${ext}`;
       fs.writeFileSync(path.join(targetDir, fname), audio.buf);
+      for (const suffix of extensions) usedNames.add(`${stem}.${suffix}`.toLowerCase());
 
       const extras = await resolveMeta(tr, signal, cache, wantLyric, wantCover).catch(() => ({ lyric: '', cover: '' }));
       let extraFiles = 0;
       if (wantLyric && extras.lyric) {
-        try { fs.writeFileSync(path.join(targetDir, `${base}.lrc`), extras.lyric, 'utf8'); extraFiles++; } catch { /* ignore */ }
+        try { fs.writeFileSync(path.join(targetDir, `${stem}.lrc`), extras.lyric, 'utf8'); extraFiles++; } catch { /* ignore */ }
       }
       if (wantCover && extras.cover) {
         try {
           const c = await getBuffer(extras.cover, { signal, timeout: 30000, retries: 1, referer: 'https://music.163.com/' });
-          if (c.buf && c.buf.length > 4096) { fs.writeFileSync(path.join(targetDir, `${base}.jpg`), c.buf); extraFiles++; }
+          if (c.buf && c.buf.length > 4096) { fs.writeFileSync(path.join(targetDir, `${stem}.jpg`), c.buf); extraFiles++; }
         } catch { /* ignore */ }
       }
 
@@ -429,11 +435,12 @@ async function downloadTracks(opts, onProgress, signal) {
       const my = idx++;
       const tr = tracks[my];
       const res = await one(tr);
+      if (!res || (cancelled() && !res.ok)) return;
       results[my] = res;
       done++;
       if (res.ok) { okCount++; totalBytes += res.bytes; } else skipCount++;
       emit({
-        type: 'track', done, total: tracks.length, ok: res.ok, name: res.name,
+        type: 'track', done, total: tracks.length, key: tr.key || `${tr.source}:${tr.id}`, ok: res.ok, name: res.name,
         source: res.source, via: res.via || '', br: res.br, bytes: res.bytes, ext: res.ext,
         reason: res.reason, matched: res.matched || '', lyric: !!res.lyric, cover: !!res.cover,
       });
@@ -471,13 +478,14 @@ async function downloadTracks(opts, onProgress, signal) {
     viaDistribution,
     lyricCount,
     coverCount,
-    skippedList: results.filter((r) => r && !r.ok).map((r) => ({ name: r.name, source: r.source, reason: r.reason })),
+    skippedList: results.flatMap((r, index) => r.ok ? [] : [{ index, name: r.name, source: r.source, reason: r.reason }]),
   };
 
   try { fs.writeFileSync(path.join(targetDir, '_下载报告.json'), JSON.stringify(summary, null, 2), 'utf8'); } catch { /* ignore */ }
-  if (summary.skippedList.length) {
+  const skippedPath = path.join(targetDir, '_跳过清单.txt');
+  if (summary.skippedList.length || (opts.retry && fs.existsSync(skippedPath))) {
     try {
-      fs.writeFileSync(path.join(targetDir, '_跳过清单.txt'), summary.skippedList.map((x) => `${x.name}\t${x.reason}`).join('\n'), 'utf8');
+      fs.writeFileSync(skippedPath, summary.skippedList.map((x) => `${x.name}\t${x.reason}`).join('\n'), 'utf8');
     } catch { /* ignore */ }
   }
   emit({ type: 'done', summary });

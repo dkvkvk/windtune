@@ -9,7 +9,7 @@ const { loadSources, host: sourceHost } = require('./src/plugin');
 app.setAppUserModelId('com.dkvkvk.windtune');
 
 let win = null;
-let currentSignal = null;
+let currentDownload = null;
 
 function iconPath() {
   const ico = path.join(__dirname, 'assets', 'icon.ico');
@@ -110,21 +110,23 @@ ipcMain.handle('app:choose-dir', async () => {
 ipcMain.handle('app:default-dir', () => path.join(app.getPath('music'), '全平台音乐'));
 
 ipcMain.handle('app:start-download', async (e, opts) => {
-  if (currentSignal) return { ok: false, error: '已有下载任务在进行，请先等待或取消' };
-  currentSignal = { cancelled: false };
+  if (currentDownload) return { ok: false, error: '已有下载任务在进行，请先等待或取消' };
+  currentDownload = new AbortController();
+  const abortSignal = currentDownload.signal;
+  const signal = { abortSignal, get cancelled() { return abortSignal.aborted; } };
   const send = (ev) => { if (win && !win.isDestroyed()) win.webContents.send('download-progress', ev); };
   try {
-    const summary = await engine.downloadTracks(opts || {}, send, currentSignal);
+    const summary = await engine.downloadTracks(opts || {}, send, signal);
     return { ok: true, summary };
   } catch (err) {
     return { ok: false, error: err && err.message ? err.message : String(err) };
   } finally {
-    currentSignal = null;
+    currentDownload = null;
   }
 });
 
 ipcMain.handle('app:cancel-download', () => {
-  if (currentSignal) currentSignal.cancelled = true;
+  currentDownload?.abort();
   return true;
 });
 
